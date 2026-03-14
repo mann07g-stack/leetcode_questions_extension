@@ -168,10 +168,7 @@ function readSettingsFromUI() {
 }
 
 async function loadOAuthSetup() {
-  var res = await sendRuntimeMessage({ type: 'getOAuthRedirectUrl' });
-  if (res && res.ok && res.redirectUrl) {
-    byId('oauthRedirectUrl').value = res.redirectUrl;
-  }
+  byId('oauthRedirectUrl').value = 'https://github.com/';
 
   var saved = await getStorage(['githubOAuthClientId']);
   if (saved.githubOAuthClientId) {
@@ -202,32 +199,35 @@ async function handleSaveOAuthConfig() {
 }
 
 async function handleConnectGithub() {
-  setStatus('Opening GitHub authorization…', false);
+  setStatus('Opening GitHub authorization in a new tab…', false);
   var response = await sendRuntimeMessage({ type: 'startGithubAuth' });
   if (!response.ok) {
-    var errMsg = response.error || 'GitHub connection failed.';
-    // REDIRECT_MISMATCH: prefix carries the redirect URL
-    if (errMsg.indexOf('REDIRECT_MISMATCH:') === 0) {
-      var redirectUrl = errMsg.slice('REDIRECT_MISMATCH:'.length);
-      byId('oauthRedirectUrl').value = redirectUrl;
-      byId('oauthSetup').open = true;
-      setStatus(
-        'Redirect URL mismatch. Add the Callback URL shown in the OAuth App Setup section to your GitHub OAuth App, then try again.',
-        true
-      );
-    } else {
-      setStatus(errMsg, true);
-    }
+    setStatus(response.error || 'GitHub connection failed.', true);
     return;
   }
 
-  // Auto-fill repo if returned by background
-  if (response.result && response.result.repo) {
-    byId('repo').value = response.result.repo;
-  }
-
-  await refreshAuthAndRepos();
-  setStatus('GitHub connected. Repo: ' + (response.result && response.result.repo ? response.result.repo : 'check Repository panel'), false);
+  // Tab is open; poll every 2 s until background stores the token
+  setStatus('Waiting for authorization… Approve on GitHub, then come back here.', false);
+  var maxPolls = 90; // 3 minutes
+  var pollsDone = 0;
+  var pollTimer = setInterval(async function () {
+    pollsDone += 1;
+    if (pollsDone > maxPolls) {
+      clearInterval(pollTimer);
+      setStatus('Authorization timed out. Please try again.', true);
+      return;
+    }
+    var auth = await sendRuntimeMessage({ type: 'getAuthStatus' });
+    if (auth && auth.ok && auth.connected) {
+      clearInterval(pollTimer);
+      var saved = await getStorage(['githubRepo']);
+      if (saved.githubRepo) {
+        byId('repo').value = saved.githubRepo;
+      }
+      await refreshAuthAndRepos();
+      setStatus('Connected as ' + (auth.username || 'GitHub user') + '!', false);
+    }
+  }, 2000);
 }
 
 async function handleDisconnectGithub() {

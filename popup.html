@@ -27,9 +27,9 @@
 
       <details id="oauthSetup" class="panel">
         <summary>&#9881; OAuth App Setup <small class="muted">(first-time only)</small></summary>
-        <p class="muted setup-hint">1. Go to <strong>github.com/settings/developers</strong> &rarr; New OAuth App<br>2. Set <strong>Authorization callback URL</strong> to the value below<br>3. Paste your Client&nbsp;ID and Client&nbsp;Secret here and save.</p>
-        <label>Callback URL (copy into GitHub OAuth App)</label>
-        <input id="oauthRedirectUrl" type="text" readonly placeholder="Loading&hellip;" />
+        <p class="muted setup-hint">1. Go to <strong>github.com/settings/developers</strong> &rarr; New OAuth App<br>2. Set <strong>Authorization callback URL</strong> to exactly: <strong>https://github.com/</strong><br>3. Paste your Client&nbsp;ID and Client&nbsp;Secret below and save. (One-time setup)</p>
+        <label>Callback URL (paste this into your GitHub OAuth App)</label>
+        <input id="oauthRedirectUrl" type="text" readonly value="https://github.com/" />
         <label for="oauthClientId">Client ID</label>
         <input id="oauthClientId" type="text" placeholder="Paste OAuth App Client ID" />
         <label for="oauthClientSecret">Client Secret</label>

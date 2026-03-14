@@ -361,72 +361,43 @@ async function exchangeCodeForAccessToken(code, redirectUri, oauthConfig) {
   return tokenPayload.access_token;
 }
 
+var OAUTH_REDIRECT_URI = 'https://github.com/';
+
 async function startGithubOAuthFlow() {
   var oauthConfig = await getOAuthConfig();
   if (!oauthConfig.clientId || !oauthConfig.clientSecret) {
     throw new Error('OAuth credentials missing. Expand "OAuth App Setup" in the popup to configure.');
   }
 
-  var redirectUri = chrome.identity.getRedirectURL('github');
   var state = createOAuthState();
 
   var authorizeUrl =
     'https://github.com/login/oauth/authorize' +
     '?client_id=' + encodeURIComponent(oauthConfig.clientId) +
-    '&redirect_uri=' + encodeURIComponent(redirectUri) +
+    '&redirect_uri=' + encodeURIComponent(OAUTH_REDIRECT_URI) +
     '&scope=' + encodeURIComponent('public_repo') +
     '&state=' + encodeURIComponent(state);
 
-  var redirectedTo;
-  try {
-    redirectedTo = await launchWebAuthFlow(authorizeUrl);
-  } catch (err) {
-    var msg = err && err.message ? err.message : '';
-    var ml = msg.toLowerCase();
-    if (
-      ml.indexOf('not associated') !== -1 ||
-      ml.indexOf('redirect_uri') !== -1 ||
-      ml.indexOf('url_mismatch') !== -1
-    ) {
-      throw new Error('REDIRECT_MISMATCH:' + redirectUri);
-    }
-    throw new Error(msg || 'Authorization window closed or failed.');
-  }
+  return new Promise(function (resolve, reject) {
+    chrome.tabs.create({ url: authorizeUrl, active: true }, function (tab) {
+      if (chrome.runtime.lastError || !tab) {
+        reject(new Error('Failed to open GitHub authorization tab.'));
+        return;
+      }
 
-  if (!redirectedTo) {
-    throw new Error('GitHub authorization was cancelled.');
-  }
-
-  var code = getQueryParam(redirectedTo, 'code');
-  var returnedState = getQueryParam(redirectedTo, 'state');
-  var errorParam = getQueryParam(redirectedTo, 'error');
-
-  if (errorParam || !code) {
-    throw new Error(errorParam ? 'GitHub denied authorization: ' + errorParam : 'No authorization code returned.');
-  }
-
-  if (returnedState !== state) {
-    throw new Error('OAuth state mismatch. Please try connecting again.');
-  }
-
-  var token = await exchangeCodeForAccessToken(code, redirectUri, oauthConfig);
-  var user = await getGithubUser(token);
-  var username = user && user.login ? user.login : '';
-  var defaultRepo = await ensureDefaultRepo(token, username);
-
-  await setStorage({
-    githubToken: token,
-    githubUsername: username,
-    githubRepo: defaultRepo,
-    githubBranch: 'main',
-    githubFolder: 'problems'
+      setStorage({
+        githubOAuthPending: true,
+        githubOAuthState: state,
+        githubOAuthTabId: tab.id,
+        githubOAuthClientId: oauthConfig.clientId,
+        githubOAuthClientSecret: oauthConfig.clientSecret
+      })
+        .then(function () {
+          resolve({ started: true, awaitingCallback: true });
+        })
+        .catch(reject);
+    });
   });
-
-  return {
-    username: username,
-    repo: defaultRepo,
-    tokenStored: true
-  };
 }
 
 async function upsertGithubFile(params) {
@@ -558,10 +529,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   }
 
   if (request.type === 'getOAuthRedirectUrl') {
-    sendResponse({
-      ok: true,
-      redirectUrl: chrome.identity.getRedirectURL('github')
-    });
+    sendResponse({ ok: true, redirectUrl: OAUTH_REDIRECT_URI });
     return;
   }
 
@@ -727,4 +695,57 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
     return true;
   }
+});
+
+// Global handler: catches GitHub OAuth redirect in the real tab
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
+  var url = changeInfo.url || '';
+  if (!url || url.indexOf(OAUTH_REDIRECT_URI) !== 0 || url.indexOf('code=') === -1) {
+    return;
+  }
+
+  getStorage(['githubOAuthPending', 'githubOAuthState', 'githubOAuthTabId', 'githubOAuthClientId', 'githubOAuthClientSecret'])
+    .then(function (stored) {
+      if (!stored.githubOAuthPending || stored.githubOAuthTabId !== tabId) {
+        return;
+      }
+
+      var code = getQueryParam(url, 'code');
+      var returnedState = getQueryParam(url, 'state');
+      var error = getQueryParam(url, 'error');
+
+      // Immediately clear pending so we don't re-process
+      setStorage({ githubOAuthPending: false, githubOAuthTabId: null });
+      // Close the auth tab
+      chrome.tabs.remove(tabId, function () { chrome.runtime.lastError; });
+
+      if (error || !code || returnedState !== stored.githubOAuthState) {
+        return;
+      }
+
+      var oauthConfig = {
+        clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
+        clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET
+      };
+
+      exchangeCodeForAccessToken(code, OAUTH_REDIRECT_URI, oauthConfig)
+        .then(function (token) {
+          return getGithubUser(token).then(function (user) {
+            var username = user && user.login ? user.login : '';
+            return ensureDefaultRepo(token, username).then(function (repo) {
+              return setStorage({
+                githubToken: token,
+                githubUsername: username,
+                githubRepo: repo,
+                githubBranch: 'main',
+                githubFolder: 'problems'
+              });
+            });
+          });
+        })
+        .catch(function (err) {
+          console.warn('LeetHub: OAuth completion error:', err && err.message ? err.message : err);
+        });
+    })
+    .catch(function () {});
 });
