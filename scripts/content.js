@@ -8,9 +8,24 @@ function pickFirstText(selectors) {
   return '';
 }
 
+function normalizeText(input) {
+  return String(input || '').replace(/\s+/g, ' ').trim();
+}
+
+function getQueryParam(key) {
+  var encoded = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var query = window.location.search || '';
+  var match = query.match(new RegExp('[?&]' + encoded + '=([^&#]+)'));
+  return match && match[1] ? decodeURIComponent(match[1]) : '';
+}
+
 function slugFromUrl(url) {
   var match = url.match(/\/problems\/([^/]+)\/?/);
   return match && match[1] ? match[1] : 'unknown-problem';
+}
+
+function isLikelyProblemPage() {
+  return /leetcode\.com\/problems\//.test(window.location.href);
 }
 
 function findLanguage() {
@@ -29,10 +44,56 @@ function findLanguage() {
   return languageText.replace(/\s+/g, ' ').trim();
 }
 
+function findDifficulty() {
+  var difficultyText = pickFirstText([
+    '[data-difficulty="EASY"]',
+    '[data-difficulty="MEDIUM"]',
+    '[data-difficulty="HARD"]',
+    'div.text-difficulty-easy',
+    'div.text-difficulty-medium',
+    'div.text-difficulty-hard',
+    '[class*="text-difficulty"]'
+  ]);
+
+  var normalized = normalizeText(difficultyText).toLowerCase();
+  if (normalized.indexOf('easy') !== -1) {
+    return 'Easy';
+  }
+  if (normalized.indexOf('medium') !== -1) {
+    return 'Medium';
+  }
+  if (normalized.indexOf('hard') !== -1) {
+    return 'Hard';
+  }
+
+  return 'Unknown';
+}
+
+function findTitle() {
+  var title = pickFirstText([
+    'div.text-title-large a',
+    '[data-cy="question-title"]',
+    'h1'
+  ]);
+
+  return normalizeText(title);
+}
+
 function extractCodeFromDom() {
   var fromTextarea = document.querySelector('textarea.inputarea');
   if (fromTextarea && fromTextarea.value && fromTextarea.value.trim()) {
     return fromTextarea.value;
+  }
+
+  var monacoLines = document.querySelectorAll('.view-lines .view-line');
+  if (monacoLines && monacoLines.length) {
+    var combined = '';
+    for (var i = 0; i < monacoLines.length; i += 1) {
+      combined += (monacoLines[i].innerText || '') + '\n';
+    }
+    if (combined.trim()) {
+      return combined.trimEnd();
+    }
   }
 
   var fromCodeBlock = document.querySelector('code');
@@ -43,72 +104,14 @@ function extractCodeFromDom() {
   return '';
 }
 
-function extractCodeFromPageContext() {
-  return new Promise(function (resolve) {
-    var requestId = 'leetcode-ext-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-
-    function handleMessage(event) {
-      if (event.source !== window) {
-        return;
-      }
-
-      var message = event.data;
-      if (!message || message.source !== 'leetcode_questions_extension' || message.requestId !== requestId) {
-        return;
-      }
-
-      window.removeEventListener('message', handleMessage);
-      resolve(message.code || '');
-    }
-
-    window.addEventListener('message', handleMessage);
-
-    var script = document.createElement('script');
-    script.textContent = '(() => {' +
-      'var extracted = "";' +
-      'try {' +
-      'if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getModels === "function") {' +
-      'var models = window.monaco.editor.getModels();' +
-      'if (models && models.length && models[0] && typeof models[0].getValue === "function") {' +
-      'extracted = models[0].getValue() || "";' +
-      '}' +
-      '}' +
-      '} catch (e) {}' +
-      'window.postMessage({' +
-      'source: "leetcode_questions_extension",' +
-      'requestId: "' + requestId + '",' +
-      'code: extracted' +
-      '}, "*");' +
-      '})();';
-
-    (document.documentElement || document.head || document.body).appendChild(script);
-    script.remove();
-
-    setTimeout(function () {
-      window.removeEventListener('message', handleMessage);
-      resolve('');
-    }, 1500);
-  });
-}
-
 async function getProblemData() {
   var url = window.location.href;
-  if (url.indexOf('leetcode.com/problems/') === -1) {
+  if (!isLikelyProblemPage()) {
     return { ok: false, error: 'Not on a LeetCode problem page.' };
   }
 
-  var title = pickFirstText([
-    'div.text-title-large a',
-    '[data-cy="question-title"]',
-    'h1'
-  ]);
-
-  var difficulty = pickFirstText([
-    'div.text-difficulty-easy',
-    'div.text-difficulty-medium',
-    'div.text-difficulty-hard',
-    '[class*="text-difficulty"]'
-  ]);
+  var title = findTitle();
+  var difficulty = findDifficulty();
 
   var statementEl = document.querySelector('[data-track-load="description_content"]') ||
     document.querySelector('.elfjS') ||
@@ -119,10 +122,7 @@ async function getProblemData() {
     statement = statementEl.innerText.trim();
   }
 
-  var code = await extractCodeFromPageContext();
-  if (!code) {
-    code = extractCodeFromDom();
-  }
+  var code = extractCodeFromDom();
 
   return {
     ok: true,
@@ -130,13 +130,162 @@ async function getProblemData() {
       title: title || slugFromUrl(url),
       slug: slugFromUrl(url),
       url: url,
-      difficulty: difficulty || 'Unknown',
+      difficulty: difficulty,
       statement: statement || 'Statement was not detected on the current page.',
       language: findLanguage(),
       code: code || '',
       savedAt: new Date().toISOString()
     }
   };
+}
+
+function maybeAcceptedOnPage() {
+  if (!document.body) {
+    return false;
+  }
+
+  var pageText = normalizeText(document.body.innerText).toLowerCase();
+  if (!pageText) {
+    return false;
+  }
+
+  return /(^|\s)accepted($|\s)/.test(pageText);
+}
+
+function hasFailedSubmissionOnPage() {
+  if (!document.body) {
+    return false;
+  }
+
+  var pageText = normalizeText(document.body.innerText).toLowerCase();
+  if (!pageText) {
+    return false;
+  }
+
+  var failures = [
+    'wrong answer',
+    'time limit exceeded',
+    'runtime error',
+    'compile error',
+    'memory limit exceeded',
+    'output limit exceeded'
+  ];
+
+  for (var i = 0; i < failures.length; i += 1) {
+    if (pageText.indexOf(failures[i]) !== -1) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+var autoSaveState = {
+  working: false,
+  lastKey: '',
+  armed: false
+};
+
+function runtimeSend(message) {
+  return new Promise(function (resolve) {
+    chrome.runtime.sendMessage(message, function (response) {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || {});
+    });
+  });
+}
+
+async function tryAutoSave() {
+  if (autoSaveState.working || !autoSaveState.armed || !isLikelyProblemPage()) {
+    return;
+  }
+
+  if (hasFailedSubmissionOnPage()) {
+    autoSaveState.armed = false;
+    return;
+  }
+
+  if (!maybeAcceptedOnPage()) {
+    return;
+  }
+
+  autoSaveState.working = true;
+  try {
+    var payload = await getProblemData();
+    if (!payload || !payload.ok) {
+      return;
+    }
+
+    var dedupeKey = [payload.data.slug, payload.data.language, (payload.data.code || '').length].join('|');
+    if (dedupeKey === autoSaveState.lastKey) {
+      return;
+    }
+
+    autoSaveState.lastKey = dedupeKey;
+    payload.data.autoTriggered = true;
+    var response = await runtimeSend({ type: 'saveProblemToGithub', payload: payload.data });
+    if (!response || !response.ok) {
+      console.warn('Auto-save failed:', response && response.error ? response.error : 'Unknown save error');
+      return;
+    }
+
+    autoSaveState.armed = false;
+  } catch (error) {
+    console.warn('Auto-save failed:', error);
+  } finally {
+    autoSaveState.working = false;
+  }
+}
+
+function isSubmitTrigger(target) {
+  if (!target) {
+    return false;
+  }
+
+  var element = target.closest('button, [role="button"]');
+  if (!element) {
+    return false;
+  }
+
+  var text = normalizeText(element.innerText || element.textContent).toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  return text === 'submit' || text.indexOf('submit') !== -1;
+}
+
+function startAcceptedWatcher() {
+  if (!document.body) {
+    return;
+  }
+
+  document.addEventListener('click', function (event) {
+    if (!isLikelyProblemPage()) {
+      return;
+    }
+
+    if (isSubmitTrigger(event.target)) {
+      autoSaveState.armed = true;
+    }
+  }, true);
+
+  var observer = new MutationObserver(function () {
+    tryAutoSave();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+
+  setInterval(function () {
+    tryAutoSave();
+  }, 2500);
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -154,3 +303,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
   return true;
 });
+
+if (isLikelyProblemPage()) {
+  startAcceptedWatcher();
+}

@@ -6,6 +6,208 @@ function getStorage(keys) {
   });
 }
 
+function setStorage(values) {
+  return new Promise(function (resolve) {
+    chrome.storage.sync.set(values, function () {
+      resolve();
+    });
+  });
+}
+
+var GITHUB_OAUTH_CLIENT_ID = 'beb4f0aa19ab8faf5004';
+var GITHUB_OAUTH_CLIENT_SECRET = '843f835609c7ef02ef0f2f1645bc49514c0e65a6';
+
+function sleep(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+function toFormBody(payload) {
+  var keys = Object.keys(payload || {});
+  var parts = [];
+  for (var i = 0; i < keys.length; i += 1) {
+    var key = keys[i];
+    parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]));
+  }
+  return parts.join('&');
+}
+
+function launchWebAuthFlow(url) {
+  return new Promise(function (resolve, reject) {
+    chrome.identity.launchWebAuthFlow(
+      {
+        url: url,
+        interactive: true
+      },
+      function (redirectedTo) {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (!redirectedTo) {
+          reject(new Error('GitHub did not return a redirect URL.'));
+          return;
+        }
+
+        resolve(redirectedTo);
+      }
+    );
+  });
+}
+
+function getQueryParam(url, key) {
+  var encoded = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var match = url.match(new RegExp('[?&]' + encoded + '=([^&#]+)'));
+  return match && match[1] ? decodeURIComponent(match[1]) : '';
+}
+
+function createOAuthState() {
+  return String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+}
+
+async function getOAuthConfig() {
+  var stored = await getStorage(['githubOAuthClientId', 'githubOAuthClientSecret']);
+  return {
+    clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
+    clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET
+  };
+}
+
+async function ensureDefaultRepo(token, username) {
+  // Find an existing LeetCode-named repo
+  try {
+    var repos = await listGithubRepos(token);
+    if (Array.isArray(repos)) {
+      for (var i = 0; i < repos.length; i++) {
+        var rn = String(repos[i].name || '').toLowerCase();
+        if (rn.indexOf('leetcode') !== -1) {
+          return repos[i].full_name;
+        }
+      }
+    }
+  } catch (e) {
+    // Fall through to create
+  }
+
+  // Create a new public repo named "leetcode-solutions"
+  try {
+    var created = await createGithubRepo(token, 'leetcode-solutions', false);
+    if (created && created.full_name) {
+      return created.full_name;
+    }
+  } catch (e) {
+    // Repo may already exist; use fallback
+  }
+
+  return username ? (username + '/leetcode-solutions') : 'leetcode-solutions';
+}
+
+function getDefaultStats() {
+  return {
+    total: 0,
+    easy: 0,
+    medium: 0,
+    hard: 0
+  };
+}
+
+async function getStats() {
+  var state = await getStorage(['stats']);
+  var stats = state.stats || {};
+  return {
+    total: Number(stats.total) || 0,
+    easy: Number(stats.easy) || 0,
+    medium: Number(stats.medium) || 0,
+    hard: Number(stats.hard) || 0
+  };
+}
+
+async function incrementStats(difficulty) {
+  var stats = await getStats();
+  var diff = String(difficulty || '').toLowerCase();
+
+  stats.total += 1;
+  if (diff === 'easy') {
+    stats.easy += 1;
+  } else if (diff === 'medium') {
+    stats.medium += 1;
+  } else if (diff === 'hard') {
+    stats.hard += 1;
+  }
+
+  await setStorage({ stats: stats });
+  return stats;
+}
+
+function fastHash(input) {
+  var text = String(input || '');
+  var hash = 0;
+  for (var i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(hash);
+}
+
+function executeScriptInMainWorld(tabId, func) {
+  return new Promise(function (resolve, reject) {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: func
+      },
+      function (results) {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (!results || !results.length) {
+          resolve('');
+          return;
+        }
+
+        resolve(results[0].result || '');
+      }
+    );
+  });
+}
+
+async function extractCodeFromTab(tabId) {
+  if (!tabId) {
+    return '';
+  }
+
+  try {
+    var code = await executeScriptInMainWorld(tabId, function () {
+      try {
+        if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getModels === 'function') {
+          var models = window.monaco.editor.getModels();
+          if (models && models.length && models[0] && typeof models[0].getValue === 'function') {
+            return models[0].getValue() || '';
+          }
+        }
+
+        var textarea = document.querySelector('textarea.inputarea');
+        if (textarea && textarea.value) {
+          return textarea.value;
+        }
+
+        return '';
+      } catch (error) {
+        return '';
+      }
+    });
+
+    return String(code || '');
+  } catch (error) {
+    return '';
+  }
+}
+
 function toBase64Unicode(input) {
   return btoa(unescape(encodeURIComponent(input)));
 }
@@ -79,9 +281,157 @@ async function githubRequest(url, options) {
   return { response: response, json: json };
 }
 
+async function githubApiWithToken(token, url, method, body) {
+  var options = {
+    method: method || 'GET',
+    headers: {
+      Authorization: 'token ' + token,
+      Accept: 'application/vnd.github+json'
+    }
+  };
+
+  if (body !== undefined) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+
+  var result = await githubRequest(url, options);
+  if (!result.response.ok) {
+    var message = result.json && result.json.message ? result.json.message : 'GitHub API error';
+    throw new Error('GitHub API error (' + result.response.status + '): ' + message);
+  }
+
+  return result.json;
+}
+
+async function getGithubUser(token) {
+  return githubApiWithToken(token, 'https://api.github.com/user', 'GET');
+}
+
+async function listGithubRepos(token) {
+  return githubApiWithToken(
+    token,
+    'https://api.github.com/user/repos?per_page=100&sort=updated',
+    'GET'
+  );
+}
+
+async function createGithubRepo(token, name, isPrivate) {
+  return githubApiWithToken(
+    token,
+    'https://api.github.com/user/repos',
+    'POST',
+    {
+      name: name,
+      private: Boolean(isPrivate),
+      auto_init: true,
+      description: 'LeetCode progress repository created by LeetCode Questions Extension'
+    }
+  );
+}
+
+async function exchangeCodeForAccessToken(code, redirectUri, oauthConfig) {
+  var tokenResponse = await githubRequest('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: toFormBody({
+      client_id: oauthConfig.clientId,
+      client_secret: oauthConfig.clientSecret,
+      code: code,
+      redirect_uri: redirectUri
+    })
+  });
+
+  if (!tokenResponse.response.ok) {
+    var tokenHttpError = tokenResponse.json && tokenResponse.json.error_description
+      ? tokenResponse.json.error_description
+      : 'Failed to exchange GitHub authorization code.';
+    throw new Error(tokenHttpError);
+  }
+
+  var tokenPayload = tokenResponse.json || {};
+  if (!tokenPayload.access_token) {
+    var tokenError = tokenPayload.error_description || tokenPayload.error || 'GitHub did not return an access token.';
+    throw new Error(tokenError);
+  }
+
+  return tokenPayload.access_token;
+}
+
+async function startGithubOAuthFlow() {
+  var oauthConfig = await getOAuthConfig();
+  if (!oauthConfig.clientId || !oauthConfig.clientSecret) {
+    throw new Error('OAuth credentials missing. Expand "OAuth App Setup" in the popup to configure.');
+  }
+
+  var redirectUri = chrome.identity.getRedirectURL('github');
+  var state = createOAuthState();
+
+  var authorizeUrl =
+    'https://github.com/login/oauth/authorize' +
+    '?client_id=' + encodeURIComponent(oauthConfig.clientId) +
+    '&redirect_uri=' + encodeURIComponent(redirectUri) +
+    '&scope=' + encodeURIComponent('public_repo') +
+    '&state=' + encodeURIComponent(state);
+
+  var redirectedTo;
+  try {
+    redirectedTo = await launchWebAuthFlow(authorizeUrl);
+  } catch (err) {
+    var msg = err && err.message ? err.message : '';
+    var ml = msg.toLowerCase();
+    if (
+      ml.indexOf('not associated') !== -1 ||
+      ml.indexOf('redirect_uri') !== -1 ||
+      ml.indexOf('url_mismatch') !== -1
+    ) {
+      throw new Error('REDIRECT_MISMATCH:' + redirectUri);
+    }
+    throw new Error(msg || 'Authorization window closed or failed.');
+  }
+
+  if (!redirectedTo) {
+    throw new Error('GitHub authorization was cancelled.');
+  }
+
+  var code = getQueryParam(redirectedTo, 'code');
+  var returnedState = getQueryParam(redirectedTo, 'state');
+  var errorParam = getQueryParam(redirectedTo, 'error');
+
+  if (errorParam || !code) {
+    throw new Error(errorParam ? 'GitHub denied authorization: ' + errorParam : 'No authorization code returned.');
+  }
+
+  if (returnedState !== state) {
+    throw new Error('OAuth state mismatch. Please try connecting again.');
+  }
+
+  var token = await exchangeCodeForAccessToken(code, redirectUri, oauthConfig);
+  var user = await getGithubUser(token);
+  var username = user && user.login ? user.login : '';
+  var defaultRepo = await ensureDefaultRepo(token, username);
+
+  await setStorage({
+    githubToken: token,
+    githubUsername: username,
+    githubRepo: defaultRepo,
+    githubBranch: 'main',
+    githubFolder: 'problems'
+  });
+
+  return {
+    username: username,
+    repo: defaultRepo,
+    tokenStored: true
+  };
+}
+
 async function upsertGithubFile(params) {
   var headers = {
-    Authorization: 'Bearer ' + params.token,
+    Authorization: 'token ' + params.token,
     Accept: 'application/vnd.github+json'
   };
 
@@ -92,6 +442,8 @@ async function upsertGithubFile(params) {
     method: 'GET',
     headers: headers
   });
+
+  var existed = existing.response.ok && existing.json && existing.json.sha;
 
   var payload = {
     message: params.message,
@@ -115,11 +467,15 @@ async function upsertGithubFile(params) {
 
   if (!writeResult.response.ok) {
     var message = writeResult.json && writeResult.json.message ? writeResult.json.message : 'GitHub API error';
-    throw new Error(message);
+    throw new Error('GitHub API error (' + writeResult.response.status + '): ' + message);
   }
+
+  return {
+    created: !existed
+  };
 }
 
-async function saveProblemToGithub(problem) {
+async function saveProblemToGithub(problem, tabId) {
   var config = await getStorage(['githubToken', 'githubRepo', 'githubBranch', 'githubFolder']);
   var token = config.githubToken;
   var repo = config.githubRepo;
@@ -130,52 +486,245 @@ async function saveProblemToGithub(problem) {
     throw new Error('Missing GitHub token or repository. Save settings in popup.');
   }
 
-  var slug = normalizePathSegment(problem.slug || problem.title || 'problem');
+  var finalProblem = Object.assign({}, problem);
+  if ((!finalProblem.code || !finalProblem.code.trim()) && tabId) {
+    finalProblem.code = await extractCodeFromTab(tabId);
+  }
+
+  if (finalProblem && finalProblem.autoTriggered) {
+    var autoState = await getStorage(['lastAutoSaveKey']);
+    var autoKey = [
+      normalizePathSegment(finalProblem.slug || ''),
+      normalizeLanguage(finalProblem.language || ''),
+      fastHash(finalProblem.code || '')
+    ].join('|');
+
+    if (autoState.lastAutoSaveKey === autoKey) {
+      return {
+        readmePath: null,
+        codePath: null,
+        skipped: true,
+        reason: 'Duplicate auto-save ignored.',
+        stats: await getStats()
+      };
+    }
+
+    await setStorage({ lastAutoSaveKey: autoKey });
+  }
+
+  var slug = normalizePathSegment(finalProblem.slug || finalProblem.title || 'problem');
   var base = folder.replace(/^\/+|\/+$/g, '') + '/' + slug;
   var readmePath = base + '/README.md';
-  var markdownContent = buildMarkdown(problem);
+  var markdownContent = buildMarkdown(finalProblem);
 
-  await upsertGithubFile({
+  var readmeWrite = await upsertGithubFile({
     token: token,
     repo: repo,
     branch: branch,
     path: readmePath,
     content: markdownContent,
-    message: 'docs: save ' + problem.title
+    message: 'docs: save ' + finalProblem.title
   });
 
   var codePath = null;
-  if (problem.code && problem.code.trim()) {
-    codePath = base + '/solution' + languageToExtension(problem.language);
+  if (finalProblem.code && finalProblem.code.trim()) {
+    codePath = base + '/solution' + languageToExtension(finalProblem.language);
 
     await upsertGithubFile({
       token: token,
       repo: repo,
       branch: branch,
       path: codePath,
-      content: problem.code,
-      message: 'code: save ' + problem.title + ' solution'
+      content: finalProblem.code,
+      message: 'code: save ' + finalProblem.title + ' solution'
     });
+  }
+
+  var stats = await getStats();
+  if (readmeWrite && readmeWrite.created) {
+    stats = await incrementStats(finalProblem.difficulty);
   }
 
   return {
     readmePath: readmePath,
-    codePath: codePath
+    codePath: codePath,
+    stats: stats
   };
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  if (!request || request.type !== 'saveProblemToGithub') {
+  if (!request || !request.type) {
     return;
   }
 
-  saveProblemToGithub(request.payload)
-    .then(function (result) {
-      sendResponse({ ok: true, result: result });
-    })
-    .catch(function (error) {
-      sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });
+  if (request.type === 'getOAuthRedirectUrl') {
+    sendResponse({
+      ok: true,
+      redirectUrl: chrome.identity.getRedirectURL('github')
     });
+    return;
+  }
 
-  return true;
+  if (request.type === 'getAuthStatus') {
+    getStorage(['githubToken', 'githubUsername'])
+      .then(function (state) {
+        sendResponse({
+          ok: true,
+          connected: Boolean(state.githubToken),
+          username: state.githubUsername || ''
+        });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to load auth status.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'startGithubAuth') {
+    startGithubOAuthFlow()
+      .then(function (result) {
+        sendResponse({ ok: true, result: result });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'GitHub connection failed.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'saveOAuthConfig') {
+    var cfg = request.payload || {};
+    var updates = {};
+    if (cfg.clientId) updates.githubOAuthClientId = String(cfg.clientId).trim();
+    if (cfg.clientSecret) updates.githubOAuthClientSecret = String(cfg.clientSecret).trim();
+    setStorage(updates)
+      .then(function () {
+        sendResponse({ ok: true });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to save OAuth config.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'clearGithubAuth') {
+    setStorage({
+      githubToken: '',
+      githubUsername: '',
+      githubRepo: ''
+    })
+      .then(function () {
+        sendResponse({ ok: true });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to clear auth.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'listUserRepos') {
+    getStorage(['githubToken'])
+      .then(function (state) {
+        if (!state.githubToken) {
+          throw new Error('Connect GitHub first.');
+        }
+        return listGithubRepos(state.githubToken);
+      })
+      .then(function (repos) {
+        var normalized = Array.isArray(repos)
+          ? repos.map(function (repo) {
+              return {
+                name: repo.name,
+                full_name: repo.full_name,
+                private: Boolean(repo.private)
+              };
+            })
+          : [];
+
+        sendResponse({ ok: true, repos: normalized });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to list repositories.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'createUserRepo') {
+    var payload = request.payload || {};
+    var repoName = String(payload.name || '').trim();
+    if (!repoName) {
+      sendResponse({ ok: false, error: 'Repository name is required.' });
+      return;
+    }
+
+    getStorage(['githubToken'])
+      .then(function (state) {
+        if (!state.githubToken) {
+          throw new Error('Connect GitHub first.');
+        }
+
+        return createGithubRepo(state.githubToken, repoName, Boolean(payload.isPrivate));
+      })
+      .then(function (repo) {
+        return setStorage({ githubRepo: repo.full_name }).then(function () {
+          return repo;
+        });
+      })
+      .then(function (repo) {
+        sendResponse({
+          ok: true,
+          repo: {
+            name: repo.name,
+            full_name: repo.full_name,
+            private: Boolean(repo.private)
+          }
+        });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to create repository.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'getStats') {
+    getStats()
+      .then(function (stats) {
+        sendResponse({ ok: true, stats: stats });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to load stats.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'saveProblemToGithub') {
+    var tabId = sender && sender.tab ? sender.tab.id : null;
+
+    saveProblemToGithub(request.payload, tabId)
+      .then(function (result) {
+        if (request.payload && request.payload.autoTriggered) {
+          setStorage({
+            lastAutoSaveStatus: {
+              ok: true,
+              at: new Date().toISOString(),
+              message: 'Auto-save successful.'
+            }
+          });
+        }
+        sendResponse({ ok: true, result: result });
+      })
+      .catch(function (error) {
+        if (request.payload && request.payload.autoTriggered) {
+          setStorage({
+            lastAutoSaveStatus: {
+              ok: false,
+              at: new Date().toISOString(),
+              message: error.message || 'Failed to save problem.'
+            }
+          });
+        }
+        sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });
+      });
+
+    return true;
+  }
 });

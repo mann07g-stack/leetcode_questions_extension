@@ -3,36 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LeetCode Saver</title>
+    <title>LeetCode Sync Hub</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main class="card">
-      <h1>LeetCode Saver</h1>
+    <main class="shell">
+      <header class="hero">
+        <h1>LeetCode Sync Hub</h1>
+        <p>Auto-sync accepted solutions to GitHub.</p>
+      </header>
 
-      <label for="token">GitHub Token</label>
-      <input id="token" type="password" placeholder="ghp_xxx" />
-
-      <label for="repo">Repository (owner/repo)</label>
-      <input id="repo" type="text" placeholder="username/leetcode-notes" />
-
-      <div class="row">
-        <div>
-          <label for="branch">Branch</label>
-          <input id="branch" type="text" value="main" />
+      <section class="panel">
+        <div class="panel-head">
+          <h2>GitHub Access</h2>
+          <span id="authBadge" class="pill pill-muted">Not Connected</span>
         </div>
-        <div>
-          <label for="folder">Folder</label>
-          <input id="folder" type="text" value="problems" />
+        <p id="authUser" class="muted">Connect to continue.</p>
+        <div class="actions">
+          <button id="connectGithub" class="primary">Connect GitHub</button>
+          <button id="disconnectGithub" class="ghost">Disconnect</button>
         </div>
-      </div>
+      </section>
 
-      <div class="actions">
-        <button id="saveSettings" class="secondary">Save Settings</button>
-        <button id="saveProblem" class="primary">Save Current Problem</button>
-      </div>
+      <details id="oauthSetup" class="panel">
+        <summary>&#9881; OAuth App Setup <small class="muted">(first-time only)</small></summary>
+        <p class="muted setup-hint">1. Go to <strong>github.com/settings/developers</strong> &rarr; New OAuth App<br>2. Set <strong>Authorization callback URL</strong> to the value below<br>3. Paste your Client&nbsp;ID and Client&nbsp;Secret here and save.</p>
+        <label>Callback URL (copy into GitHub OAuth App)</label>
+        <input id="oauthRedirectUrl" type="text" readonly placeholder="Loading&hellip;" />
+        <label for="oauthClientId">Client ID</label>
+        <input id="oauthClientId" type="text" placeholder="Paste OAuth App Client ID" />
+        <label for="oauthClientSecret">Client Secret</label>
+        <input id="oauthClientSecret" type="password" placeholder="Paste OAuth App Client Secret" />
+        <button id="saveOAuthConfig" class="secondary full">Save OAuth Credentials</button>
+      </details>
 
-      <p id="status" aria-live="polite"></p>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Repository</h2>
+          <button id="refreshRepos" class="ghost">Refresh</button>
+        </div>
+
+        <label for="repoSelect">Choose Existing Repo</label>
+        <div class="row-fit">
+          <select id="repoSelect"></select>
+          <button id="useSelectedRepo" class="secondary">Use</button>
+        </div>
+
+        <label for="newRepoName">Create New Repo</label>
+        <div class="row-fit">
+          <input id="newRepoName" type="text" placeholder="leetcode_questions" />
+          <select id="newRepoVisibility">
+            <option value="private">Private</option>
+            <option value="public">Public</option>
+          </select>
+        </div>
+        <button id="createRepo" class="secondary full">Create Repository</button>
+
+        <label for="repo">Active Repo (owner/repo)</label>
+        <input id="repo" type="text" placeholder="mann07g-stack/leetcode_questions" />
+      </section>
+
+      <section class="panel">
+        <h2>Sync Settings</h2>
+        <div class="row">
+          <div>
+            <label for="branch">Branch</label>
+            <input id="branch" type="text" value="main" />
+          </div>
+          <div>
+            <label for="folder">Folder</label>
+            <input id="folder" type="text" value="problems" />
+          </div>
+        </div>
+
+        <label for="token">Manual Token (optional fallback)</label>
+        <input id="token" type="password" placeholder="Paste PAT only if needed" />
+
+        <div class="actions">
+          <button id="saveSettings" class="secondary">Save Settings</button>
+          <button id="saveProblem" class="primary">Save Current Problem</button>
+        </div>
+      </section>
+
+      <section class="panel stats">
+        <h2>Saved Problems</h2>
+        <div class="stats-grid">
+          <div><span>Total</span><strong id="totalCount">0</strong></div>
+          <div><span>Easy</span><strong id="easyCount">0</strong></div>
+          <div><span>Medium</span><strong id="mediumCount">0</strong></div>
+          <div><span>Hard</span><strong id="hardCount">0</strong></div>
+        </div>
+      </section>
+
+      <p id="status" aria-live="polite" class="status"></p>
     </main>
 
     <script src="popup.js"></script>

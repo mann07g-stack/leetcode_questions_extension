@@ -4,34 +4,117 @@
 
 body {
   margin: 0;
-  font-family: Segoe UI, Arial, sans-serif;
-  width: 360px;
-  background: #f4f6fb;
+  width: 400px;
+  min-height: 560px;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  color: #f3f7ff;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(86, 114, 250, 0.28), transparent 45%),
+    radial-gradient(circle at 85% 10%, rgba(16, 185, 129, 0.22), transparent 42%),
+    linear-gradient(165deg, #071224 0%, #0d1a33 45%, #11172b 100%);
 }
 
-.card {
+.shell {
   padding: 14px;
+  display: grid;
+  gap: 10px;
 }
 
-h1 {
-  margin: 0 0 12px;
+.hero {
+  border: 1px solid rgba(153, 173, 224, 0.28);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(120deg, rgba(28, 45, 86, 0.72), rgba(30, 39, 74, 0.62));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.hero h1 {
+  margin: 0;
   font-size: 20px;
-  color: #152138;
+  letter-spacing: 0.3px;
+}
+
+.hero p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #b5c2e8;
+}
+
+.panel {
+  border: 1px solid rgba(146, 164, 209, 0.25);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(11, 21, 42, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 13px;
+  color: #dbe6ff;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.muted {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #aab9de;
+}
+
+.pill {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+
+.pill-muted {
+  color: #d4ddf6;
+  background: rgba(122, 138, 182, 0.18);
+  border-color: rgba(158, 172, 209, 0.3);
+}
+
+.pill-success {
+  color: #d8ffe9;
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.45);
 }
 
 label {
   display: block;
-  margin: 10px 0 4px;
+  margin: 8px 0 4px;
   font-size: 12px;
-  color: #22324f;
+  color: #c2d0f7;
 }
 
-input {
+input,
+select {
   width: 100%;
-  border: 1px solid #c8d2e6;
+  border: 1px solid rgba(150, 167, 210, 0.4);
   border-radius: 8px;
-  padding: 9px 10px;
+  padding: 9px;
   font-size: 13px;
+  color: #f0f6ff;
+  background: rgba(10, 18, 35, 0.9);
+  outline: none;
+}
+
+input[readonly] {
+  opacity: 0.85;
+  cursor: text;
+  border-style: dashed;
+}
+
+input:focus,
+select:focus {
+  border-color: #6ca7ff;
+  box-shadow: 0 0 0 2px rgba(108, 167, 255, 0.2);
 }
 
 .row {
@@ -43,32 +126,97 @@ input {
 .actions {
   display: flex;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 10px;
+}
+
+.row-fit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.full {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.stats-grid div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(18, 33, 63, 0.78);
+  font-size: 12px;
+  border: 1px solid rgba(130, 149, 197, 0.25);
+}
+
+.stats-grid strong {
+  color: #dbe6ff;
 }
 
 button {
   flex: 1;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 8px;
-  padding: 10px;
+  padding: 9px 10px;
   cursor: pointer;
   font-weight: 600;
   font-size: 12px;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
 }
 
 button.primary {
-  background: #165dff;
+  background: linear-gradient(120deg, #2e7cff, #4c64ff);
   color: #fff;
+  border-color: rgba(128, 160, 255, 0.5);
 }
 
 button.secondary {
-  background: #e5ebf8;
-  color: #17356f;
+  background: linear-gradient(120deg, #223664, #2b457d);
+  color: #e7efff;
+  border-color: rgba(138, 162, 224, 0.35);
 }
 
-#status {
+button.ghost {
+  background: rgba(20, 35, 68, 0.5);
+  color: #cfe0ff;
+  border-color: rgba(124, 149, 209, 0.35);
+  flex: 0;
+}
+
+.status {
   margin-top: 10px;
-  min-height: 18px;
+  min-height: 20px;
   font-size: 12px;
-  color: #1d2f55;
+  color: #b6c8f3;
+}
+
+details.panel > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: #9fb8f0;
+  padding: 2px 0 6px;
+  user-select: none;
+}
+
+details.panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  margin-bottom: 8px;
 }
