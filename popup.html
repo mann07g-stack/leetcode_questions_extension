@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeetCode Saver</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>LeetCode Saver</h1>
+
+      <label for="token">GitHub Token</label>
+      <input id="token" type="password" placeholder="ghp_xxx" />
+
+      <label for="repo">Repository (owner/repo)</label>
+      <input id="repo" type="text" placeholder="username/leetcode-notes" />
+
+      <div class="row">
+        <div>
+          <label for="branch">Branch</label>
+          <input id="branch" type="text" value="main" />
+        </div>
+        <div>
+          <label for="folder">Folder</label>
+          <input id="folder" type="text" value="problems" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="saveSettings" class="secondary">Save Settings</button>
+        <button id="saveProblem" class="primary">Save Current Problem</button>
+      </div>
+
+      <p id="status" aria-live="polite"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

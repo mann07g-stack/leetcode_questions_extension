@@ -1,0 +1,74 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Segoe UI, Arial, sans-serif;
+  width: 360px;
+  background: #f4f6fb;
+}
+
+.card {
+  padding: 14px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  color: #152138;
+}
+
+label {
+  display: block;
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: #22324f;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #c8d2e6;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+button {
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+button.primary {
+  background: #165dff;
+  color: #fff;
+}
+
+button.secondary {
+  background: #e5ebf8;
+  color: #17356f;
+}
+
+#status {
+  margin-top: 10px;
+  min-height: 18px;
+  font-size: 12px;
+  color: #1d2f55;
+}
