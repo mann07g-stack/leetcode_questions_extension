@@ -14,6 +14,16 @@ function normalizeText(input) {
     .trim();
 }
 
+function fastHash(input) {
+  var text = String(input || '');
+  var hash = 0;
+  for (var i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(hash);
+}
+
 function slugFromUrl(url) {
   var match = url.match(/\/problems\/([^/]+)\/?/);
   return match && match[1] ? match[1] : 'unknown-problem';
@@ -59,12 +69,38 @@ function findLanguage() {
 }
 
 function getSubmissionStatusFromPage() {
-  if (!document.body) {
-    return 'unknown';
+  var statusSelectors = [
+    '[data-e2e-locator*="submission"]',
+    '[data-e2e-locator*="result"]',
+    '[class*="submission"]',
+    '[class*="result"]',
+    '[id*="submission"]',
+    '[id*="result"]',
+    '[aria-live="polite"]',
+    '[role="status"]',
+  ];
+
+  var scopedTextParts = [];
+  for (var i = 0; i < statusSelectors.length; i += 1) {
+    var nodes = document.querySelectorAll(statusSelectors[i]);
+    if (!nodes || !nodes.length) {
+      continue;
+    }
+    for (var j = 0; j < nodes.length; j += 1) {
+      var piece = normalizeText(nodes[j].innerText || nodes[j].textContent || '');
+      if (piece) {
+        scopedTextParts.push(piece.toLowerCase());
+      }
+    }
   }
 
-  var pageText = normalizeText(document.body.innerText).toLowerCase();
-  if (!pageText) {
+  var statusText = scopedTextParts.join(' ');
+  if (!statusText && document.body) {
+    // Fallback if selectors miss due UI updates.
+    statusText = normalizeText(document.body.innerText || '').toLowerCase();
+  }
+
+  if (!statusText) {
     return 'unknown';
   }
 
@@ -78,23 +114,34 @@ function getSubmissionStatusFromPage() {
     'presentation error',
   ];
 
-  for (var i = 0; i < failedSignals.length; i += 1) {
-    if (pageText.indexOf(failedSignals[i]) !== -1) {
+  for (var k = 0; k < failedSignals.length; k += 1) {
+    if (statusText.indexOf(failedSignals[k]) !== -1) {
       return 'failed';
     }
+  }
+
+  if (statusText.indexOf('all test cases passed') !== -1) {
+    return 'accepted';
+  }
+
+  if (statusText.indexOf('accepted') !== -1 && statusText.indexOf('acceptance rate') === -1) {
+    return 'accepted';
   }
 
   var acceptedRegex = /\baccepted\b(?!\s*rate)/i;
   var acceptanceRegex = /\bacceptance\b/i;
   var acceptedWithContext =
     /\baccepted\b[^]{0,140}\b(runtime|memory|beats|testcase|testcases|cases\s+passed)\b/i.test(
-      pageText
+      statusText
     ) ||
     /\b(runtime|memory|beats|testcase|testcases|cases\s+passed)\b[^]{0,140}\baccepted\b/i.test(
-      pageText
+      statusText
     );
 
-  if (acceptedWithContext || (acceptedRegex.test(pageText) && !acceptanceRegex.test(pageText))) {
+  if (
+    acceptedWithContext ||
+    (acceptedRegex.test(statusText) && !acceptanceRegex.test(statusText))
+  ) {
     return 'accepted';
   }
 
@@ -206,6 +253,7 @@ var autoSaveState = {
   lastKey: '',
   armed: false,
   armedAt: 0,
+  seenPendingAfterSubmit: false,
 };
 
 function runtimeSend(message) {
@@ -230,7 +278,17 @@ async function tryAutoSave() {
     return;
   }
 
+  var pageText = normalizeText(document.body ? document.body.innerText : '').toLowerCase();
+  var looksPending =
+    pageText.indexOf('submitting') !== -1 ||
+    pageText.indexOf('judging') !== -1 ||
+    pageText.indexOf('running') !== -1;
+  if (looksPending) {
+    autoSaveState.seenPendingAfterSubmit = true;
+  }
+
   if (hasFailedSubmissionOnPage()) {
+    // Wrong/failed submissions should not be saved.
     autoSaveState.armed = false;
     return;
   }
@@ -249,7 +307,7 @@ async function tryAutoSave() {
     var dedupeKey = [
       payload.data.slug,
       payload.data.language,
-      (payload.data.code || '').length,
+      fastHash(payload.data.code || ''),
     ].join('|');
     if (dedupeKey === autoSaveState.lastKey) {
       return;
@@ -318,7 +376,27 @@ function startAcceptedWatcher() {
       if (isSubmitTrigger(event.target)) {
         autoSaveState.armed = true;
         autoSaveState.armedAt = Date.now();
+        autoSaveState.seenPendingAfterSubmit = false;
       }
+    },
+    true
+  );
+
+  document.addEventListener(
+    'keydown',
+    function (event) {
+      if (!isLikelyProblemPage()) {
+        return;
+      }
+
+      var isSubmitShortcut = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
+      if (!isSubmitShortcut) {
+        return;
+      }
+
+      autoSaveState.armed = true;
+      autoSaveState.armedAt = Date.now();
+      autoSaveState.seenPendingAfterSubmit = false;
     },
     true
   );
