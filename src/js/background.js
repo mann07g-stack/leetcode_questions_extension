@@ -315,7 +315,7 @@ async function getGithubUser(token) {
 async function listGithubRepos(token) {
   return githubApiWithToken(
     token,
-    'https://api.github.com/user/repos?per_page=100&sort=updated',
+    'https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member',
     'GET'
   );
 }
@@ -383,7 +383,7 @@ async function startGithubOAuthFlow() {
     '&redirect_uri=' +
     encodeURIComponent(OAUTH_REDIRECT_URI) +
     '&scope=' +
-    encodeURIComponent('public_repo') +
+    encodeURIComponent('repo') +
     '&state=' +
     encodeURIComponent(state);
 
