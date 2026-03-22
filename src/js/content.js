@@ -356,22 +356,6 @@ async function tryAutoSave() {
     return;
   }
 
-  // Avoid stale "Accepted" state from a previous run. We require
-  // that either a pending phase was observed or the pre-submit state
-  // was not already accepted.
-  if (
-    !autoSaveState.seenPendingAfterSubmit &&
-    autoSaveState.preSubmitStatus === 'accepted' &&
-    Date.now() - autoSaveState.armedAt < 120000
-  ) {
-    debugAutoSave('skip-stale-accepted', {
-      preSubmitStatus: autoSaveState.preSubmitStatus,
-      seenPendingAfterSubmit: autoSaveState.seenPendingAfterSubmit,
-      ageMs: Date.now() - autoSaveState.armedAt,
-    });
-    return;
-  }
-
   autoSaveState.working = true;
   try {
     var payload = await getProblemData();
@@ -387,6 +371,22 @@ async function tryAutoSave() {
       payload.data.language,
       fastHash(payload.data.code || ''),
     ].join('|');
+
+    // If submit started from an already-Accepted page and we did not observe
+    // a pending phase, only skip when content is unchanged.
+    if (
+      !autoSaveState.seenPendingAfterSubmit &&
+      autoSaveState.preSubmitStatus === 'accepted' &&
+      dedupeKey === autoSaveState.lastKey
+    ) {
+      debugAutoSave('skip-stale-accepted', {
+        preSubmitStatus: autoSaveState.preSubmitStatus,
+        seenPendingAfterSubmit: autoSaveState.seenPendingAfterSubmit,
+        dedupeUnchanged: true,
+      });
+      return;
+    }
+
     if (dedupeKey === autoSaveState.lastKey) {
       debugAutoSave('skip-duplicate', {
         slug: payload.data.slug,

@@ -101,9 +101,14 @@ function updateDebugUI(info) {
   }
 
   var stage = latest && latest.stage ? latest.stage : 'n/a';
-  var message = status && status.message ? status.message : '';
-  var at = (status && status.at) || (latest && latest.at) || '';
-  debugEl.textContent = 'Stage: ' + stage + (message ? ' | ' + message : '') + (at ? ' | ' + at : '');
+  var details = latest && latest.details ? latest.details : {};
+  var detailMessage = details.error || details.message || '';
+  var statusMessage = status && status.message ? status.message : '';
+  var at = (latest && latest.at) || (status && status.at) || '';
+
+  var message = detailMessage || statusMessage;
+  debugEl.textContent =
+    'Stage: ' + stage + (message ? ' | ' + message : '') + (at ? ' | ' + at : '');
 }
 
 async function refreshAutoSaveDebug() {
