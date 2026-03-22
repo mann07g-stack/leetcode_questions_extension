@@ -301,13 +301,25 @@ var AUTO_SAVE_DEBUG = true;
 
 function runtimeSend(message) {
   return new Promise(function (resolve) {
-    chrome.runtime.sendMessage(message, function (response) {
-      if (chrome.runtime.lastError) {
-        resolve({ ok: false, error: chrome.runtime.lastError.message });
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+        resolve({ ok: false, error: 'Extension runtime unavailable.' });
         return;
       }
-      resolve(response || {});
-    });
+
+      chrome.runtime.sendMessage(message, function (response) {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response || {});
+      });
+    } catch (error) {
+      resolve({
+        ok: false,
+        error: error && error.message ? error.message : 'Failed to send runtime message.',
+      });
+    }
   });
 }
 
