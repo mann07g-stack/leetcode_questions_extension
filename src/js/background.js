@@ -16,6 +16,7 @@ function setStorage(values) {
 
 var GITHUB_OAUTH_CLIENT_ID = '';
 var GITHUB_OAUTH_CLIENT_SECRET = '';
+var AUTO_SAVE_DEBUG = true;
 
 function toFormBody(payload) {
   var keys = Object.keys(payload || {});
@@ -100,6 +101,21 @@ async function incrementStats(difficulty) {
 
   await setStorage({ stats: stats });
   return stats;
+}
+
+async function appendAutoSaveDebug(entry) {
+  if (!AUTO_SAVE_DEBUG) {
+    return;
+  }
+
+  var state = await getStorage(['autoSaveDebugLog']);
+  var log = Array.isArray(state.autoSaveDebugLog) ? state.autoSaveDebugLog : [];
+  log.push(entry);
+  if (log.length > 80) {
+    log = log.slice(log.length - 80);
+  }
+
+  await setStorage({ autoSaveDebugLog: log });
 }
 
 function fastHash(input) {
@@ -554,6 +570,52 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     return;
   }
 
+  if (request.type === 'autosaveDebug') {
+    var incoming = request.payload || {};
+    appendAutoSaveDebug({
+      source: incoming.source || 'unknown',
+      stage: incoming.stage || 'unknown',
+      details: incoming.details || {},
+      at: incoming.at || new Date().toISOString(),
+      url: incoming.url || '',
+    })
+      .then(function () {
+        sendResponse({ ok: true });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to append debug log.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'getAutoSaveDebugInfo') {
+    getStorage(['lastAutoSaveStatus', 'autoSaveDebugLog'])
+      .then(function (state) {
+        var logs = Array.isArray(state.autoSaveDebugLog) ? state.autoSaveDebugLog : [];
+        sendResponse({
+          ok: true,
+          status: state.lastAutoSaveStatus || null,
+          latest: logs.length ? logs[logs.length - 1] : null,
+          logs: logs,
+        });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to load debug info.' });
+      });
+    return true;
+  }
+
+  if (request.type === 'clearAutoSaveDebugLog') {
+    setStorage({ autoSaveDebugLog: [] })
+      .then(function () {
+        sendResponse({ ok: true });
+      })
+      .catch(function (error) {
+        sendResponse({ ok: false, error: error.message || 'Failed to clear debug log.' });
+      });
+    return true;
+  }
+
   if (request.type === 'getOAuthRedirectUrl') {
     sendResponse({ ok: true, redirectUrl: OAUTH_REDIRECT_URI });
     return;
@@ -703,6 +765,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
               message: 'Auto-save successful.',
             },
           });
+          appendAutoSaveDebug({
+            source: 'background',
+            stage: 'save-success',
+            details: {
+              slug: request.payload.slug || '',
+              language: request.payload.language || '',
+              readmePath: result.readmePath || null,
+              codePath: result.codePath || null,
+            },
+            at: new Date().toISOString(),
+            url: request.payload.url || '',
+          });
         }
         sendResponse({ ok: true, result: result });
       })
@@ -714,6 +788,17 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
               at: new Date().toISOString(),
               message: error.message || 'Failed to save problem.',
             },
+          });
+          appendAutoSaveDebug({
+            source: 'background',
+            stage: 'save-failed',
+            details: {
+              slug: request.payload.slug || '',
+              language: request.payload.language || '',
+              error: error.message || 'Failed to save problem.',
+            },
+            at: new Date().toISOString(),
+            url: request.payload.url || '',
           });
         }
         sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });

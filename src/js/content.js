@@ -240,21 +240,17 @@ async function getProblemData() {
   };
 }
 
-function maybeAcceptedOnPage() {
-  return getSubmissionStatusFromPage() === 'accepted';
-}
-
-function hasFailedSubmissionOnPage() {
-  return getSubmissionStatusFromPage() === 'failed';
-}
-
 var autoSaveState = {
   working: false,
   lastKey: '',
   armed: false,
   armedAt: 0,
   seenPendingAfterSubmit: false,
+  preSubmitStatus: 'unknown',
+  lastObservedStatus: 'unknown',
 };
+
+var AUTO_SAVE_DEBUG = true;
 
 function runtimeSend(message) {
   return new Promise(function (resolve) {
@@ -268,12 +264,32 @@ function runtimeSend(message) {
   });
 }
 
+function debugAutoSave(stage, data) {
+  if (!AUTO_SAVE_DEBUG) {
+    return;
+  }
+
+  var payload = {
+    source: 'content',
+    stage: stage,
+    details: data || {},
+    at: new Date().toISOString(),
+    url: window.location.href,
+  };
+
+  console.log('[leet-questions][autosave]', payload);
+  runtimeSend({ type: 'autosaveDebug', payload: payload });
+}
+
 async function tryAutoSave() {
   if (autoSaveState.working || !autoSaveState.armed || !isLikelyProblemPage()) {
     return;
   }
 
   if (!autoSaveState.armedAt || Date.now() - autoSaveState.armedAt > 3 * 60 * 1000) {
+    debugAutoSave('disarmed-timeout', {
+      armedAt: autoSaveState.armedAt,
+    });
     autoSaveState.armed = false;
     return;
   }
@@ -287,13 +303,42 @@ async function tryAutoSave() {
     autoSaveState.seenPendingAfterSubmit = true;
   }
 
-  if (hasFailedSubmissionOnPage()) {
+  var currentStatus = getSubmissionStatusFromPage();
+  if (currentStatus !== autoSaveState.lastObservedStatus) {
+    autoSaveState.lastObservedStatus = currentStatus;
+    debugAutoSave('status-changed', {
+      status: currentStatus,
+      seenPendingAfterSubmit: autoSaveState.seenPendingAfterSubmit,
+      preSubmitStatus: autoSaveState.preSubmitStatus,
+    });
+  }
+
+  if (currentStatus === 'failed') {
     // Wrong/failed submissions should not be saved.
+    debugAutoSave('disarmed-failed', {
+      preSubmitStatus: autoSaveState.preSubmitStatus,
+    });
     autoSaveState.armed = false;
     return;
   }
 
-  if (!maybeAcceptedOnPage()) {
+  if (currentStatus !== 'accepted') {
+    return;
+  }
+
+  // Avoid stale "Accepted" state from a previous run. We require
+  // that either a pending phase was observed or the pre-submit state
+  // was not already accepted.
+  if (
+    !autoSaveState.seenPendingAfterSubmit &&
+    autoSaveState.preSubmitStatus === 'accepted' &&
+    Date.now() - autoSaveState.armedAt < 120000
+  ) {
+    debugAutoSave('skip-stale-accepted', {
+      preSubmitStatus: autoSaveState.preSubmitStatus,
+      seenPendingAfterSubmit: autoSaveState.seenPendingAfterSubmit,
+      ageMs: Date.now() - autoSaveState.armedAt,
+    });
     return;
   }
 
@@ -301,6 +346,9 @@ async function tryAutoSave() {
   try {
     var payload = await getProblemData();
     if (!payload || !payload.ok) {
+      debugAutoSave('collect-failed', {
+        payloadOk: Boolean(payload && payload.ok),
+      });
       return;
     }
 
@@ -310,14 +358,26 @@ async function tryAutoSave() {
       fastHash(payload.data.code || ''),
     ].join('|');
     if (dedupeKey === autoSaveState.lastKey) {
+      debugAutoSave('skip-duplicate', {
+        slug: payload.data.slug,
+        language: payload.data.language,
+      });
       return;
     }
 
     autoSaveState.lastKey = dedupeKey;
     payload.data.autoTriggered = true;
     payload.data.submissionAccepted = true;
+    debugAutoSave('save-start', {
+      slug: payload.data.slug,
+      language: payload.data.language,
+      codeLength: (payload.data.code || '').length,
+    });
     var response = await runtimeSend({ type: 'saveProblemToGithub', payload: payload.data });
     if (!response || !response.ok) {
+      debugAutoSave('save-failed', {
+        error: response && response.error ? response.error : 'Unknown save error',
+      });
       console.warn(
         'Auto-save failed:',
         response && response.error ? response.error : 'Unknown save error'
@@ -335,8 +395,15 @@ async function tryAutoSave() {
       return;
     }
 
+    debugAutoSave('save-success', {
+      readmePath: response.result ? response.result.readmePath : null,
+      codePath: response.result ? response.result.codePath : null,
+    });
     autoSaveState.armed = false;
   } catch (error) {
+    debugAutoSave('save-exception', {
+      error: error && error.message ? error.message : String(error),
+    });
     console.warn('Auto-save failed:', error);
   } finally {
     autoSaveState.working = false;
@@ -377,6 +444,11 @@ function startAcceptedWatcher() {
         autoSaveState.armed = true;
         autoSaveState.armedAt = Date.now();
         autoSaveState.seenPendingAfterSubmit = false;
+        autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
+        autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
+        debugAutoSave('submit-armed-click', {
+          preSubmitStatus: autoSaveState.preSubmitStatus,
+        });
       }
     },
     true
@@ -397,6 +469,11 @@ function startAcceptedWatcher() {
       autoSaveState.armed = true;
       autoSaveState.armedAt = Date.now();
       autoSaveState.seenPendingAfterSubmit = false;
+      autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
+      autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
+      debugAutoSave('submit-armed-shortcut', {
+        preSubmitStatus: autoSaveState.preSubmitStatus,
+      });
     },
     true
   );

@@ -82,6 +82,45 @@ function updateStatsUI(stats) {
   byId('hardCount').textContent = String(safeStats.hard || 0);
 }
 
+function updateDebugUI(info) {
+  var debugEl = byId('debugStatus');
+  if (!debugEl) {
+    return;
+  }
+
+  if (!info || !info.ok) {
+    debugEl.textContent = (info && info.error) || 'Could not load debug status.';
+    return;
+  }
+
+  var latest = info.latest;
+  var status = info.status;
+  if (!latest && !status) {
+    debugEl.textContent = 'No auto-save events yet.';
+    return;
+  }
+
+  var stage = latest && latest.stage ? latest.stage : 'n/a';
+  var message = status && status.message ? status.message : '';
+  var at = (status && status.at) || (latest && latest.at) || '';
+  debugEl.textContent = 'Stage: ' + stage + (message ? ' | ' + message : '') + (at ? ' | ' + at : '');
+}
+
+async function refreshAutoSaveDebug() {
+  var info = await sendRuntimeMessage({ type: 'getAutoSaveDebugInfo' });
+  updateDebugUI(info);
+}
+
+async function clearAutoSaveDebug() {
+  var res = await sendRuntimeMessage({ type: 'clearAutoSaveDebugLog' });
+  if (!res.ok) {
+    setStatus(res.error || 'Failed to clear debug logs.', true);
+    return;
+  }
+  await refreshAutoSaveDebug();
+  setStatus('Auto-save debug log cleared.', false);
+}
+
 function setAuthState(connected, username) {
   var badge = byId('authBadge');
   var label = byId('authUser');
@@ -342,12 +381,15 @@ async function init() {
   byId('saveSettings').addEventListener('click', handleSaveSettings);
   byId('saveProblem').addEventListener('click', handleSaveProblem);
   byId('saveOAuthConfig').addEventListener('click', handleSaveOAuthConfig);
+  byId('refreshDebug').addEventListener('click', refreshAutoSaveDebug);
+  byId('clearDebug').addEventListener('click', clearAutoSaveDebug);
 
   byId('saveProblem').textContent = 'Auto-save Only';
 
   await loadOAuthSetup();
   await refreshStats();
   await refreshAuthAndRepos();
+  await refreshAutoSaveDebug();
 }
 
 document.addEventListener('DOMContentLoaded', init);
