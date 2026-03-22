@@ -34,13 +34,26 @@ function queryActiveTab() {
 
 function sendTabMessage(tabId, message) {
   return new Promise(function (resolve, reject) {
-    chrome.tabs.sendMessage(tabId, message, function (response) {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+    try {
+      if (typeof chrome === 'undefined' || !chrome || !chrome.tabs || typeof chrome.tabs.sendMessage !== 'function') {
+        reject(new Error('Extension runtime unavailable for tab messaging.'));
         return;
       }
-      resolve(response);
-    });
+      var runtime = chrome.runtime;
+      chrome.tabs.sendMessage(tabId, message, function (response) {
+        try {
+          if (runtime && runtime.lastError) {
+            reject(new Error(runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        } catch (callbackError) {
+          reject(callbackError);
+        }
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 

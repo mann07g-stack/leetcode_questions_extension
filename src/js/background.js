@@ -130,26 +130,37 @@ function fastHash(input) {
 
 function executeScriptInMainWorld(tabId, func) {
   return new Promise(function (resolve, reject) {
-    chrome.scripting.executeScript(
-      {
-        target: { tabId: tabId },
-        world: 'MAIN',
-        func: func,
-      },
-      function (results) {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-
-        if (!results || !results.length) {
-          resolve('');
-          return;
-        }
-
-        resolve(results[0].result || '');
+    try {
+      if (typeof chrome === 'undefined' || !chrome || !chrome.scripting || typeof chrome.scripting.executeScript !== 'function') {
+        reject(new Error('Extension runtime unavailable for script execution.'));
+        return;
       }
-    );
+      var runtime = chrome.runtime;
+      chrome.scripting.executeScript(
+        {
+          target: { tabId: tabId },
+          world: 'MAIN',
+          func: func,
+        },
+        function (results) {
+          try {
+            if (runtime && runtime.lastError) {
+              reject(new Error(runtime.lastError.message));
+              return;
+            }
+            if (!results || !results.length) {
+              resolve('');
+              return;
+            }
+            resolve(results[0].result || '');
+          } catch (callbackError) {
+            reject(callbackError);
+          }
+        }
+      );
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -471,24 +482,36 @@ async function startGithubOAuthFlow() {
     encodeURIComponent(state);
 
   return new Promise(function (resolve, reject) {
-    chrome.tabs.create({ url: authorizeUrl, active: true }, function (tab) {
-      if (chrome.runtime.lastError || !tab) {
-        reject(new Error('Failed to open GitHub authorization tab.'));
+    try {
+      if (typeof chrome === 'undefined' || !chrome || !chrome.tabs || typeof chrome.tabs.create !== 'function') {
+        reject(new Error('Extension runtime unavailable for tab creation.'));
         return;
       }
-
-      setStorage({
-        githubOAuthPending: true,
-        githubOAuthState: state,
-        githubOAuthTabId: tab.id,
-        githubOAuthClientId: oauthConfig.clientId,
-        githubOAuthClientSecret: oauthConfig.clientSecret,
-      })
-        .then(function () {
-          resolve({ started: true, awaitingCallback: true });
-        })
-        .catch(reject);
-    });
+      var runtime = chrome.runtime;
+      chrome.tabs.create({ url: authorizeUrl, active: true }, function (tab) {
+        try {
+          if (!runtime || (runtime.lastError && runtime.lastError.message) || !tab) {
+            reject(new Error('Failed to open GitHub authorization tab.'));
+            return;
+          }
+          setStorage({
+            githubOAuthPending: true,
+            githubOAuthState: state,
+            githubOAuthTabId: tab.id,
+            githubOAuthClientId: oauthConfig.clientId,
+            githubOAuthClientSecret: oauthConfig.clientSecret,
+          })
+            .then(function () {
+              resolve({ started: true, awaitingCallback: true });
+            })
+            .catch(reject);
+        } catch (callbackError) {
+          reject(callbackError);
+        }
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -632,306 +655,359 @@ async function saveProblemToGithub(problem, tabId) {
   };
 }
 
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  if (!request || !request.type) {
-    return;
-  }
-
-  if (request.type === 'autosaveDebug') {
-    var incoming = request.payload || {};
-    appendAutoSaveDebug({
-      source: incoming.source || 'unknown',
-      stage: incoming.stage || 'unknown',
-      details: incoming.details || {},
-      at: incoming.at || new Date().toISOString(),
-      url: incoming.url || '',
-    })
-      .then(function () {
-        sendResponse({ ok: true });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to append debug log.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'getAutoSaveDebugInfo') {
-    getStorage(['lastAutoSaveStatus', 'autoSaveDebugLog'])
-      .then(function (state) {
-        var logs = Array.isArray(state.autoSaveDebugLog) ? state.autoSaveDebugLog : [];
-        sendResponse({
-          ok: true,
-          status: state.lastAutoSaveStatus || null,
-          latest: logs.length ? logs[logs.length - 1] : null,
-          logs: logs,
-        });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to load debug info.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'clearAutoSaveDebugLog') {
-    setStorage({ autoSaveDebugLog: [] })
-      .then(function () {
-        sendResponse({ ok: true });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to clear debug log.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'getOAuthRedirectUrl') {
-    sendResponse({ ok: true, redirectUrl: OAUTH_REDIRECT_URI });
-    return;
-  }
-
-  if (request.type === 'getAuthStatus') {
-    getStorage(['githubToken', 'githubUsername'])
-      .then(function (state) {
-        sendResponse({
-          ok: true,
-          connected: Boolean(state.githubToken),
-          username: state.githubUsername || '',
-        });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to load auth status.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'startGithubAuth') {
-    startGithubOAuthFlow()
-      .then(function (result) {
-        sendResponse({ ok: true, result: result });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'GitHub connection failed.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'saveOAuthConfig') {
-    var cfg = request.payload || {};
-    var updates = {};
-    if (cfg.clientId) updates.githubOAuthClientId = String(cfg.clientId).trim();
-    if (cfg.clientSecret) updates.githubOAuthClientSecret = String(cfg.clientSecret).trim();
-    setStorage(updates)
-      .then(function () {
-        sendResponse({ ok: true });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to save OAuth config.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'clearGithubAuth') {
-    setStorage({
-      githubToken: '',
-      githubUsername: '',
-      githubRepo: '',
-    })
-      .then(function () {
-        sendResponse({ ok: true });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to clear auth.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'listUserRepos') {
-    getStorage(['githubToken'])
-      .then(function (state) {
-        if (!state.githubToken) {
-          throw new Error('Connect GitHub first.');
-        }
-        return listGithubRepos(state.githubToken);
-      })
-      .then(function (repos) {
-        var normalized = Array.isArray(repos)
-          ? repos.map(function (repo) {
-              return {
-                name: repo.name,
-                full_name: repo.full_name,
-                private: Boolean(repo.private),
-              };
-            })
-          : [];
-
-        sendResponse({ ok: true, repos: normalized });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to list repositories.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'createUserRepo') {
-    var payload = request.payload || {};
-    var repoName = String(payload.name || '').trim();
-    if (!repoName) {
-      sendResponse({ ok: false, error: 'Repository name is required.' });
+// Safe wrapper to guard against extension reload during message handling
+function setupBackgroundMessageListener() {
+  try {
+    var runtime = typeof chrome !== 'undefined' && chrome && chrome.runtime ? chrome.runtime : null;
+    if (!runtime || !runtime.onMessage || typeof runtime.onMessage.addListener !== 'function') {
+      console.warn('[leet-questions] chrome.runtime.onMessage not available in background');
       return;
     }
-
-    getStorage(['githubToken'])
-      .then(function (state) {
-        if (!state.githubToken) {
-          throw new Error('Connect GitHub first.');
+    runtime.onMessage.addListener(function (request, sender, sendResponse) {
+      try {
+        if (!request || !request.type) {
+          return;
         }
 
-        return createGithubRepo(state.githubToken, repoName, Boolean(payload.isPrivate));
-      })
-      .then(function (repo) {
-        return setStorage({ githubRepo: repo.full_name }).then(function () {
-          return repo;
-        });
-      })
-      .then(function (repo) {
-        sendResponse({
-          ok: true,
-          repo: {
-            name: repo.name,
-            full_name: repo.full_name,
-            private: Boolean(repo.private),
-          },
-        });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to create repository.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'getStats') {
-    getStats()
-      .then(function (stats) {
-        sendResponse({ ok: true, stats: stats });
-      })
-      .catch(function (error) {
-        sendResponse({ ok: false, error: error.message || 'Failed to load stats.' });
-      });
-    return true;
-  }
-
-  if (request.type === 'saveProblemToGithub') {
-    var tabId = sender && sender.tab ? sender.tab.id : null;
-
-    saveProblemToGithub(request.payload, tabId)
-      .then(function (result) {
-        if (request.payload && request.payload.autoTriggered) {
-          setStorage({
-            lastAutoSaveStatus: {
-              ok: true,
-              at: new Date().toISOString(),
-              message: 'Auto-save successful.',
-            },
-          });
+        if (request.type === 'autosaveDebug') {
+          var incoming = request.payload || {};
           appendAutoSaveDebug({
-            source: 'background',
-            stage: 'save-success',
-            details: {
-              slug: request.payload.slug || '',
-              language: request.payload.language || '',
-              readmePath: result.readmePath || null,
-              codePath: result.codePath || null,
-            },
-            at: new Date().toISOString(),
-            url: request.payload.url || '',
-          });
+            source: incoming.source || 'unknown',
+            stage: incoming.stage || 'unknown',
+            details: incoming.details || {},
+            at: incoming.at || new Date().toISOString(),
+            url: incoming.url || '',
+          })
+            .then(function () {
+              sendResponse({ ok: true });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to append debug log.' });
+            });
+          return true;
         }
-        sendResponse({ ok: true, result: result });
-      })
-      .catch(function (error) {
-        if (request.payload && request.payload.autoTriggered) {
-          setStorage({
-            lastAutoSaveStatus: {
-              ok: false,
-              at: new Date().toISOString(),
-              message: error.message || 'Failed to save problem.',
-            },
-          });
-          appendAutoSaveDebug({
-            source: 'background',
-            stage: 'save-failed',
-            details: {
-              slug: request.payload.slug || '',
-              language: request.payload.language || '',
-              error: error.message || 'Failed to save problem.',
-            },
-            at: new Date().toISOString(),
-            url: request.payload.url || '',
-          });
-        }
-        sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });
-      });
 
-    return true;
+        if (request.type === 'getAutoSaveDebugInfo') {
+          getStorage(['lastAutoSaveStatus', 'autoSaveDebugLog'])
+            .then(function (state) {
+              var logs = Array.isArray(state.autoSaveDebugLog) ? state.autoSaveDebugLog : [];
+              sendResponse({
+                ok: true,
+                status: state.lastAutoSaveStatus || null,
+                latest: logs.length ? logs[logs.length - 1] : null,
+                logs: logs,
+              });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to load debug info.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'clearAutoSaveDebugLog') {
+          setStorage({ autoSaveDebugLog: [] })
+            .then(function () {
+              sendResponse({ ok: true });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to clear debug log.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'getOAuthRedirectUrl') {
+          sendResponse({ ok: true, redirectUrl: OAUTH_REDIRECT_URI });
+          return;
+        }
+
+        if (request.type === 'getAuthStatus') {
+          getStorage(['githubToken', 'githubUsername'])
+            .then(function (state) {
+              sendResponse({
+                ok: true,
+                connected: Boolean(state.githubToken),
+                username: state.githubUsername || '',
+              });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to load auth status.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'startGithubAuth') {
+          startGithubOAuthFlow()
+            .then(function (result) {
+              sendResponse({ ok: true, result: result });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'GitHub connection failed.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'saveOAuthConfig') {
+          var cfg = request.payload || {};
+          var updates = {};
+          if (cfg.clientId) updates.githubOAuthClientId = String(cfg.clientId).trim();
+          if (cfg.clientSecret) updates.githubOAuthClientSecret = String(cfg.clientSecret).trim();
+          setStorage(updates)
+            .then(function () {
+              sendResponse({ ok: true });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to save OAuth config.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'clearGithubAuth') {
+          setStorage({
+            githubToken: '',
+            githubUsername: '',
+            githubRepo: '',
+          })
+            .then(function () {
+              sendResponse({ ok: true });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to clear auth.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'listUserRepos') {
+          getStorage(['githubToken'])
+            .then(function (state) {
+              if (!state.githubToken) {
+                throw new Error('Connect GitHub first.');
+              }
+              return listGithubRepos(state.githubToken);
+            })
+            .then(function (repos) {
+              var normalized = Array.isArray(repos)
+                ? repos.map(function (repo) {
+                    return {
+                      name: repo.name,
+                      full_name: repo.full_name,
+                      private: Boolean(repo.private),
+                    };
+                  })
+                : [];
+
+              sendResponse({ ok: true, repos: normalized });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to list repositories.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'createUserRepo') {
+          var payload = request.payload || {};
+          var repoName = String(payload.name || '').trim();
+          if (!repoName) {
+            sendResponse({ ok: false, error: 'Repository name is required.' });
+            return;
+          }
+
+          getStorage(['githubToken'])
+            .then(function (state) {
+              if (!state.githubToken) {
+                throw new Error('Connect GitHub first.');
+              }
+
+              return createGithubRepo(state.githubToken, repoName, Boolean(payload.isPrivate));
+            })
+            .then(function (repo) {
+              return setStorage({ githubRepo: repo.full_name }).then(function () {
+                return repo;
+              });
+            })
+            .then(function (repo) {
+              sendResponse({
+                ok: true,
+                repo: {
+                  name: repo.name,
+                  full_name: repo.full_name,
+                  private: Boolean(repo.private),
+                },
+              });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to create repository.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'getStats') {
+          getStats()
+            .then(function (stats) {
+              sendResponse({ ok: true, stats: stats });
+            })
+            .catch(function (error) {
+              sendResponse({ ok: false, error: error.message || 'Failed to load stats.' });
+            });
+          return true;
+        }
+
+        if (request.type === 'saveProblemToGithub') {
+          var tabId = sender && sender.tab ? sender.tab.id : null;
+
+          saveProblemToGithub(request.payload, tabId)
+            .then(function (result) {
+              if (request.payload && request.payload.autoTriggered) {
+                setStorage({
+                  lastAutoSaveStatus: {
+                    ok: true,
+                    at: new Date().toISOString(),
+                    message: 'Auto-save successful.',
+                  },
+                });
+                appendAutoSaveDebug({
+                  source: 'background',
+                  stage: 'save-success',
+                  details: {
+                    slug: request.payload.slug || '',
+                    language: request.payload.language || '',
+                    readmePath: result.readmePath || null,
+                    codePath: result.codePath || null,
+                  },
+                  at: new Date().toISOString(),
+                  url: request.payload.url || '',
+                });
+              }
+              try {
+                if (typeof sendResponse === 'function') {
+                  sendResponse({ ok: true, result: result });
+                }
+              } catch (sendError) {
+                console.warn('[leet-questions] Failed to send save response:', sendError.message);
+              }
+            })
+            .catch(function (error) {
+              if (request.payload && request.payload.autoTriggered) {
+                setStorage({
+                  lastAutoSaveStatus: {
+                    ok: false,
+                    at: new Date().toISOString(),
+                    message: error.message || 'Failed to save problem.',
+                  },
+                });
+                appendAutoSaveDebug({
+                  source: 'background',
+                  stage: 'save-failed',
+                  details: {
+                    slug: request.payload.slug || '',
+                    language: request.payload.language || '',
+                    error: error.message || 'Failed to save problem.',
+                  },
+                  at: new Date().toISOString(),
+                  url: request.payload.url || '',
+                });
+              }
+              try {
+                if (typeof sendResponse === 'function') {
+                  sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });
+                }
+              } catch (sendError) {
+                console.warn('[leet-questions] Failed to send error response:', sendError.message);
+              }
+            });
+
+          return true;
+        }
+      } catch (handlerError) {
+        console.warn('[leet-questions] Message listener error:', handlerError.message);
+      }
+    });
+  } catch (setupError) {
+    console.warn('[leet-questions] Failed to setup background message listener:', setupError.message);
   }
-});
+}
+
+setupBackgroundMessageListener();
 
 // Global handler: catches GitHub OAuth redirect in the real tab
-chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
-  var url = changeInfo.url || '';
-  if (!url || url.indexOf(OAUTH_REDIRECT_URI) !== 0 || url.indexOf('code=') === -1) {
-    return;
-  }
+function setupTabsUpdateListener() {
+  try {
+    var tabs = typeof chrome !== 'undefined' && chrome && chrome.tabs ? chrome.tabs : null;
+    if (!tabs || !tabs.onUpdated || typeof tabs.onUpdated.addListener !== 'function') {
+      console.warn('[leet-questions] chrome.tabs.onUpdated not available in background');
+      return;
+    }
+    tabs.onUpdated.addListener(function (tabId, changeInfo) {
+      try {
+        var url = changeInfo.url || '';
+        if (!url || url.indexOf(OAUTH_REDIRECT_URI) !== 0 || url.indexOf('code=') === -1) {
+          return;
+        }
 
-  getStorage([
-    'githubOAuthPending',
-    'githubOAuthState',
-    'githubOAuthTabId',
-    'githubOAuthClientId',
-    'githubOAuthClientSecret',
-  ])
-    .then(function (stored) {
-      if (!stored.githubOAuthPending || stored.githubOAuthTabId !== tabId) {
-        return;
-      }
+        getStorage([
+          'githubOAuthPending',
+          'githubOAuthState',
+          'githubOAuthTabId',
+          'githubOAuthClientId',
+          'githubOAuthClientSecret',
+        ])
+          .then(function (stored) {
+            if (!stored.githubOAuthPending || stored.githubOAuthTabId !== tabId) {
+              return;
+            }
 
-      var code = getQueryParam(url, 'code');
-      var returnedState = getQueryParam(url, 'state');
-      var error = getQueryParam(url, 'error');
+            var code = getQueryParam(url, 'code');
+            var returnedState = getQueryParam(url, 'state');
+            var error = getQueryParam(url, 'error');
 
-      // Immediately clear pending so we don't re-process
-      setStorage({ githubOAuthPending: false, githubOAuthTabId: null });
-      // Close the auth tab
-      chrome.tabs.remove(tabId, function () {
-        chrome.runtime.lastError;
-      });
+            // Immediately clear pending so we don't re-process
+            setStorage({ githubOAuthPending: false, githubOAuthTabId: null });
+            // Close the auth tab
+            try {
+              if (typeof chrome !== 'undefined' && chrome && chrome.tabs && typeof chrome.tabs.remove === 'function') {
+                chrome.tabs.remove(tabId, function () {
+                  // Suppress errors silently (auth tab may be closed already)
+                });
+              }
+            } catch (removeError) {
+              console.warn('[leet-questions] Failed to remove auth tab:', removeError.message);
+            }
 
-      if (error || !code || returnedState !== stored.githubOAuthState) {
-        return;
-      }
+            if (error || !code || returnedState !== stored.githubOAuthState) {
+              return;
+            }
 
-      var oauthConfig = {
-        clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
-        clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET,
-      };
+            var oauthConfig = {
+              clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
+              clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET,
+            };
 
-      exchangeCodeForAccessToken(code, OAUTH_REDIRECT_URI, oauthConfig)
-        .then(function (token) {
-          return getGithubUser(token).then(function (user) {
-            var username = user && user.login ? user.login : '';
-            return ensureDefaultRepo(token, username).then(function (repo) {
-              return setStorage({
-                githubToken: token,
-                githubUsername: username,
-                githubRepo: repo,
-                githubBranch: 'main',
-                githubFolder: 'problems',
+            exchangeCodeForAccessToken(code, OAUTH_REDIRECT_URI, oauthConfig)
+              .then(function (token) {
+                return getGithubUser(token).then(function (user) {
+                  var username = user && user.login ? user.login : '';
+                  return ensureDefaultRepo(token, username).then(function (repo) {
+                    return setStorage({
+                      githubToken: token,
+                      githubUsername: username,
+                      githubRepo: repo,
+                      githubBranch: 'main',
+                      githubFolder: 'problems',
+                    });
+                  });
+                });
+              })
+              .catch(function (err) {
+                console.warn('LeetHub: OAuth completion error:', err && err.message ? err.message : err);
               });
-            });
-          });
-        })
-        .catch(function (err) {
-          console.warn('LeetHub: OAuth completion error:', err && err.message ? err.message : err);
-        });
-    })
-    .catch(function () {});
-});
+          })
+          .catch(function () {});
+      } catch (listenerError) {
+        console.warn('[leet-questions] Tabs updated listener error:', listenerError.message);
+      }
+    });
+  } catch (setupError) {
+    console.warn('[leet-questions] Failed to setup tabs listener:', setupError.message);
+  }
+}
+
+setupTabsUpdateListener();

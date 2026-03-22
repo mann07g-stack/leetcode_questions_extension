@@ -605,21 +605,57 @@ function startAcceptedWatcher() {
   }, 2500);
 }
 
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  if (!request || request.type !== 'collectProblemData') {
-    return;
-  }
+// Safe wrapper to guard against extension reload during message handling.
+function setupMessageListener() {
+  try {
+    var runtime = typeof chrome !== 'undefined' && chrome && chrome.runtime ? chrome.runtime : null;
+    if (!runtime || !runtime.onMessage || typeof runtime.onMessage.addListener !== 'function') {
+      console.warn('[leet-questions] chrome.runtime.onMessage not available');
+      return;
+    }
 
-  getProblemData()
-    .then(function (payload) {
-      sendResponse(payload);
-    })
-    .catch(function (error) {
-      sendResponse({ ok: false, error: error.message || 'Failed to collect problem data.' });
+    runtime.onMessage.addListener(function (request, sender, sendResponse) {
+      try {
+        if (!request || request.type !== 'collectProblemData') {
+          return;
+        }
+
+        getProblemData()
+          .then(function (payload) {
+            try {
+              if (typeof sendResponse === 'function') {
+                sendResponse(payload);
+              }
+            } catch (sendError) {
+              console.warn('[leet-questions] Failed to send response:', sendError.message);
+            }
+          })
+          .catch(function (error) {
+            try {
+              if (typeof sendResponse === 'function') {
+                sendResponse({
+                  ok: false,
+                  error: error && error.message ? error.message : 'Failed to collect problem data.',
+                });
+              }
+            } catch (sendError) {
+              console.warn('[leet-questions] Failed to send error response:', sendError.message);
+            }
+          });
+
+        return true;
+      } catch (handlerError) {
+        console.warn('[leet-questions] Message listener error:', handlerError.message);
+      }
     });
+  } catch (setupError) {
+    console.warn('[leet-questions] Failed to setup message listener:', setupError.message);
+  }
+}
 
-  return true;
-});
+if (isLikelyProblemPage()) {
+  setupMessageListener();
+}
 
 if (isLikelyProblemPage()) {
   startAcceptedWatcher();
