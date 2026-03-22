@@ -247,6 +247,41 @@ button.ghost {
   flex: 0;
 }
 
+.sync-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 152px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(217, 228, 255, 0.35);
+  border-top-color: #dbe6ff;
+  animation: sync-spin 0.75s linear infinite;
+}
+
+.sync-btn.loading {
+  opacity: 0.85;
+  cursor: wait;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .status {
   margin-top: 10px;
   min-height: 20px;

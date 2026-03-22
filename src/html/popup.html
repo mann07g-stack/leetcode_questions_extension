@@ -124,7 +124,13 @@
       </section>
 
       <section class="panel stats">
-        <h2>Saved Problems</h2>
+        <div class="panel-head">
+          <h2>Saved Problems</h2>
+          <button id="syncAcceptedProfile" class="secondary sync-btn">
+            <span id="syncAcceptedLabel">Sync All Accepted</span>
+            <span id="syncAcceptedSpinner" class="spinner hidden" aria-hidden="true"></span>
+          </button>
+        </div>
         <div class="stats-grid">
           <div><span>Total</span><strong id="totalCount">0</strong></div>
           <div><span>Easy</span><strong id="easyCount">0</strong></div>

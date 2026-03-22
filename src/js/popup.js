@@ -35,7 +35,12 @@ function queryActiveTab() {
 function sendTabMessage(tabId, message) {
   return new Promise(function (resolve, reject) {
     try {
-      if (typeof chrome === 'undefined' || !chrome || !chrome.tabs || typeof chrome.tabs.sendMessage !== 'function') {
+      if (
+        typeof chrome === 'undefined' ||
+        !chrome ||
+        !chrome.tabs ||
+        typeof chrome.tabs.sendMessage !== 'function'
+      ) {
         reject(new Error('Extension runtime unavailable for tab messaging.'));
         return;
       }
@@ -409,7 +414,97 @@ async function handleSaveSettings() {
 }
 
 async function handleSaveProblem() {
-  setStatus('Manual save is disabled. Submit on LeetCode; accepted solutions auto-save only.', true);
+  setStatus(
+    'Manual save is disabled. Submit on LeetCode; accepted solutions auto-save only.',
+    true
+  );
+}
+
+function setSyncAcceptedLoading(isLoading, labelText) {
+  var button = byId('syncAcceptedProfile');
+  var spinner = byId('syncAcceptedSpinner');
+  var label = byId('syncAcceptedLabel');
+
+  if (!button || !spinner || !label) {
+    return;
+  }
+
+  if (isLoading) {
+    button.disabled = true;
+    button.classList.add('loading');
+    spinner.classList.remove('hidden');
+    label.textContent = labelText || 'Syncing…';
+    return;
+  }
+
+  button.disabled = false;
+  button.classList.remove('loading');
+  spinner.classList.add('hidden');
+  label.textContent = labelText || 'Sync All Accepted';
+}
+
+function isLeetCodeTab(tab) {
+  if (!tab || !tab.url) {
+    return false;
+  }
+  return /https:\/\/(www\.)?leetcode\.com\//.test(String(tab.url));
+}
+
+async function requestBulkAcceptedSync(tabId) {
+  return sendTabMessage(tabId, {
+    type: 'bulkSyncAcceptedProfile',
+    payload: { maxToScan: 2000 },
+  });
+}
+
+async function handleSyncAcceptedProfile() {
+  setSyncAcceptedLoading(true, 'Syncing…');
+  setStatus('Syncing accepted submissions from your LeetCode profile…', false);
+
+  try {
+    var tab = await queryActiveTab();
+    if (!isLeetCodeTab(tab)) {
+      setStatus('Open a LeetCode tab first, then click Sync All Accepted.', true);
+      return;
+    }
+
+    var response;
+    try {
+      response = await requestBulkAcceptedSync(tab.id);
+    } catch (messageError) {
+      var messageText = messageError && messageError.message ? messageError.message : '';
+      if (/receiving end does not exist/i.test(messageText)) {
+        await injectContentScript(tab.id);
+        response = await requestBulkAcceptedSync(tab.id);
+      } else {
+        throw messageError;
+      }
+    }
+
+    if (!response || !response.ok) {
+      setStatus((response && response.error) || 'Bulk sync failed.', true);
+      return;
+    }
+
+    var result = response.result || {};
+    var summary =
+      'Sync complete. Saved: ' +
+      String(result.saved || 0) +
+      ', Skipped: ' +
+      String(result.skipped || 0) +
+      ', Failed: ' +
+      String(result.failed || 0) +
+      ', Total accepted scanned: ' +
+      String(result.totalAccepted || 0) +
+      '.';
+    setStatus(summary, false);
+    await refreshStats();
+    await refreshAutoSaveDebug();
+  } catch (error) {
+    setStatus(error && error.message ? error.message : 'Bulk sync failed.', true);
+  } finally {
+    setSyncAcceptedLoading(false, 'Sync All Accepted');
+  }
 }
 
 async function init() {
@@ -431,6 +526,7 @@ async function init() {
   byId('refreshDebug').addEventListener('click', refreshAutoSaveDebug);
   byId('clearDebug').addEventListener('click', clearAutoSaveDebug);
   byId('saveCommitOptions').addEventListener('click', handleSaveCommitOptions);
+  byId('syncAcceptedProfile').addEventListener('click', handleSyncAcceptedProfile);
 
   byId('saveProblem').textContent = 'Auto-save Only';
 
