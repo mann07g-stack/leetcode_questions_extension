@@ -1,6 +1,11 @@
 function pickFirstText(selectors) {
   for (var i = 0; i < selectors.length; i += 1) {
-    var el = document.querySelector(selectors[i]);
+    var el = null;
+    try {
+      el = document.querySelector(selectors[i]);
+    } catch {
+      continue;
+    }
     if (el && el.textContent && el.textContent.trim()) {
       return el.textContent.trim();
     }
@@ -79,7 +84,14 @@ function findLanguage() {
   }
 
   if (!languageText) {
-    var ariaLabelSources = document.querySelectorAll('[aria-label*="language" i]');
+    var ariaLabelSources = [];
+    try {
+      ariaLabelSources = document.querySelectorAll(
+        '[aria-label*="language"], [aria-label*="Language"], [aria-label*="LANGUAGE"]'
+      );
+    } catch {
+      ariaLabelSources = [];
+    }
     for (var i = 0; i < ariaLabelSources.length; i += 1) {
       var ariaCandidate = sanitizeLanguageCandidate(
         ariaLabelSources[i].innerText || ariaLabelSources[i].textContent || ''
@@ -433,6 +445,7 @@ async function tryAutoSave() {
   } catch (error) {
     debugAutoSave('save-exception', {
       error: error && error.message ? error.message : String(error),
+      stack: error && error.stack ? String(error.stack) : '',
     });
     console.warn('Auto-save failed:', error);
   } finally {
