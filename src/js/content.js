@@ -301,9 +301,10 @@ var AUTO_SAVE_DEBUG = true;
 
 function getSafeRuntime() {
   try {
-    var host = typeof globalThis !== 'undefined' ? globalThis : window;
-    var maybeChrome = host && host.chrome ? host.chrome : null;
-    var runtime = maybeChrome && maybeChrome.runtime ? maybeChrome.runtime : null;
+    if (typeof chrome === 'undefined' || !chrome || !chrome.runtime) {
+      return null;
+    }
+    var runtime = chrome.runtime;
     if (!runtime || !runtime.id) {
       return null;
     }
