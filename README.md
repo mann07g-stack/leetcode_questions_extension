@@ -31,6 +31,15 @@ Every user should create their own GitHub OAuth app and enter their own credenti
 8. Click Save OAuth Credentials
 9. Click Connect GitHub and authorize
 
+### Required Permissions
+
+The extension requests the `repo` scope which grants:
+- Access to **public and private repositories** you own
+- Ability to **create new repositories**
+- Ability to **push code and commits** to your repositories
+
+This scope is necessary to provide full functionality including private repo access and repo creation. The extension only uses these permissions to save your LeetCode solutions.
+
 ## Extension Setup
 
 1. Open `chrome://extensions`
