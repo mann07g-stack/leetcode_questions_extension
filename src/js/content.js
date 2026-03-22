@@ -458,7 +458,13 @@ function isSubmitTrigger(target) {
     return false;
   }
 
-  var element = target.closest('button, [role="button"]');
+  var element = null;
+  if (typeof target.closest === 'function') {
+    element = target.closest('button, [role="button"]');
+  } else if (target.parentElement && typeof target.parentElement.closest === 'function') {
+    element = target.parentElement.closest('button, [role="button"]');
+  }
+
   if (!element) {
     return false;
   }
@@ -479,18 +485,24 @@ function startAcceptedWatcher() {
   document.addEventListener(
     'click',
     function (event) {
-      if (!isLikelyProblemPage()) {
-        return;
-      }
+      try {
+        if (!isLikelyProblemPage()) {
+          return;
+        }
 
-      if (isSubmitTrigger(event.target)) {
-        autoSaveState.armed = true;
-        autoSaveState.armedAt = Date.now();
-        autoSaveState.seenPendingAfterSubmit = false;
-        autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
-        autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
-        debugAutoSave('submit-armed-click', {
-          preSubmitStatus: autoSaveState.preSubmitStatus,
+        if (isSubmitTrigger(event.target)) {
+          autoSaveState.armed = true;
+          autoSaveState.armedAt = Date.now();
+          autoSaveState.seenPendingAfterSubmit = false;
+          autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
+          autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
+          debugAutoSave('submit-armed-click', {
+            preSubmitStatus: autoSaveState.preSubmitStatus,
+          });
+        }
+      } catch (error) {
+        debugAutoSave('submit-click-handler-error', {
+          error: error && error.message ? error.message : String(error),
         });
       }
     },
@@ -500,29 +512,39 @@ function startAcceptedWatcher() {
   document.addEventListener(
     'keydown',
     function (event) {
-      if (!isLikelyProblemPage()) {
-        return;
-      }
+      try {
+        if (!isLikelyProblemPage()) {
+          return;
+        }
 
-      var isSubmitShortcut = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
-      if (!isSubmitShortcut) {
-        return;
-      }
+        var isSubmitShortcut = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
+        if (!isSubmitShortcut) {
+          return;
+        }
 
-      autoSaveState.armed = true;
-      autoSaveState.armedAt = Date.now();
-      autoSaveState.seenPendingAfterSubmit = false;
-      autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
-      autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
-      debugAutoSave('submit-armed-shortcut', {
-        preSubmitStatus: autoSaveState.preSubmitStatus,
-      });
+        autoSaveState.armed = true;
+        autoSaveState.armedAt = Date.now();
+        autoSaveState.seenPendingAfterSubmit = false;
+        autoSaveState.preSubmitStatus = getSubmissionStatusFromPage();
+        autoSaveState.lastObservedStatus = autoSaveState.preSubmitStatus;
+        debugAutoSave('submit-armed-shortcut', {
+          preSubmitStatus: autoSaveState.preSubmitStatus,
+        });
+      } catch (error) {
+        debugAutoSave('submit-shortcut-handler-error', {
+          error: error && error.message ? error.message : String(error),
+        });
+      }
     },
     true
   );
 
   var observer = new MutationObserver(function () {
-    tryAutoSave();
+    tryAutoSave().catch(function (error) {
+      debugAutoSave('observer-tryAutoSave-error', {
+        error: error && error.message ? error.message : String(error),
+      });
+    });
   });
 
   observer.observe(document.body, {
@@ -532,7 +554,11 @@ function startAcceptedWatcher() {
   });
 
   setInterval(function () {
-    tryAutoSave();
+    tryAutoSave().catch(function (error) {
+      debugAutoSave('interval-tryAutoSave-error', {
+        error: error && error.message ? error.message : String(error),
+      });
+    });
   }, 2500);
 }
 
