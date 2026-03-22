@@ -31,19 +31,34 @@ function isLikelyProblemPage() {
 }
 
 function findLanguage() {
-  var languageText = pickFirstText([
+  var selectors = [
     'button[data-cy="lang-select"]',
     'div[data-cy="lang-select"]',
     '[id*="headlessui-listbox-button"]',
     '[class*="language-select"] button',
     '[class*="lang-select"] button',
-  ]);
+    '.select-language',
+    '[role="button"][data-testid="lang"]',
+  ];
+
+  var languageText = pickFirstText(selectors);
+
+  if (!languageText || languageText === 'Unknown') {
+    var monacoLangEl = document.querySelector('[class*="editor"] [class*="language"]') ||
+      document.querySelector('[data-testid="language-selector"]') ||
+      document.querySelector('[class*="lang"]');
+    if (monacoLangEl && monacoLangEl.textContent) {
+      languageText = monacoLangEl.textContent;
+    }
+  }
 
   if (!languageText) {
     return 'Unknown';
   }
 
-  return languageText.replace(/\s+/g, ' ').trim();
+  var cleaned = languageText.replace(/\s+/g, ' ').trim().split(/[\s,]/)[0];
+
+  return cleaned || 'Unknown';
 }
 
 function findDifficulty() {

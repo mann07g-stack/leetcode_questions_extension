@@ -238,9 +238,13 @@ function languageToExtension(language) {
     java: '.java',
     python: '.py',
     python3: '.py',
+    python2: '.py',
     javascript: '.js',
+    'javascript (es6)': '.js',
+    'javascript (es5)': '.js',
     typescript: '.ts',
     go: '.go',
+    golang: '.go',
     kotlin: '.kt',
     rust: '.rs',
     ruby: '.rb',
@@ -250,12 +254,60 @@ function languageToExtension(language) {
     'c#': '.cs',
     csharp: '.cs',
     mysql: '.sql',
+    sql: '.sql',
     mssql: '.sql',
     oracle: '.sql',
+    plpgsql: '.sql',
+    postgres: '.sql',
+    r: '.r',
+    dart: '.dart',
+    bash: '.sh',
+    shell: '.sh',
+    elixir: '.ex',
+    erlang: '.erl',
+    clojure: '.clj',
+    lisp: '.lisp',
+    scheme: '.scm',
+    racket: '.rkt',
+    lua: '.lua',
+    perl: '.pl',
+    haskell: '.hs',
+    ocaml: '.ml',
+    'f#': '.fs',
+    fsharp: '.fs',
+    groovy: '.groovy',
+    solidity: '.sol',
+    vb: '.vb',
+    'visual basic': '.vb',
   };
 
-  var key = normalizeLanguage(language).replace(/\s+/g, '');
-  return map[key] || '.txt';
+  var normalized = String(language || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[()]/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+  if (map[normalized]) {
+    return map[normalized];
+  }
+
+  var key = normalized.replace(/\s+/g, '');
+  for (var mapKey in map) {
+    if (mapKey === key || mapKey === normalized) {
+      return map[mapKey];
+    }
+  }
+
+  var lowerLang = normalized.split(' ')[0];
+  for (var mapKeyAlt in map) {
+    if (mapKeyAlt.indexOf(lowerLang) !== -1 || lowerLang.indexOf(mapKeyAlt) !== -1) {
+      return map[mapKeyAlt];
+    }
+  }
+
+  return '.txt';
 }
 
 function buildMarkdown(problem) {
