@@ -189,6 +189,44 @@ async function extractCodeFromTab(tabId) {
   }
 }
 
+async function resolveBestCode(existingCode, tabId) {
+  var current = String(existingCode || '');
+
+  if (!tabId) {
+    return current;
+  }
+
+  var live = await extractCodeFromTab(tabId);
+  var liveTrimmed = String(live || '').trim();
+  var currentTrimmed = current.trim();
+
+  if (!liveTrimmed) {
+    return current;
+  }
+
+  if (!currentTrimmed) {
+    return live;
+  }
+
+  if (liveTrimmed === currentTrimmed) {
+    return current;
+  }
+
+  // Prefer full editor model content from main world when lengths differ.
+  if (live.length >= current.length) {
+    return live;
+  }
+
+  // Even if character length is close, prefer the one with more lines.
+  var liveLines = live.split('\n').length;
+  var currentLines = current.split('\n').length;
+  if (liveLines > currentLines) {
+    return live;
+  }
+
+  return current;
+}
+
 function toBase64Unicode(input) {
   return btoa(unescape(encodeURIComponent(input)));
 }
@@ -522,9 +560,7 @@ async function saveProblemToGithub(problem, tabId) {
     throw new Error('Latest submission is not accepted. Only accepted submissions are saved.');
   }
 
-  if ((!finalProblem.code || !finalProblem.code.trim()) && tabId) {
-    finalProblem.code = await extractCodeFromTab(tabId);
-  }
+  finalProblem.code = await resolveBestCode(finalProblem.code, tabId);
 
   if (!finalProblem.code || !finalProblem.code.trim()) {
     throw new Error('No solution code detected. Submission was not saved.');
