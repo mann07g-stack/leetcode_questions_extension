@@ -299,34 +299,56 @@ if (!_leetQuestionsRoot.__leetQuestionsAutoSaveState) {
 var autoSaveState = _leetQuestionsRoot.__leetQuestionsAutoSaveState;
 var AUTO_SAVE_DEBUG = true;
 
+function getSafeRuntime() {
+  try {
+    var host = typeof globalThis !== 'undefined' ? globalThis : window;
+    var maybeChrome = host && host.chrome ? host.chrome : null;
+    var runtime = maybeChrome && maybeChrome.runtime ? maybeChrome.runtime : null;
+    if (!runtime || !runtime.id) {
+      return null;
+    }
+    return runtime;
+  } catch {
+    return null;
+  }
+}
+
 function runtimeSend(message) {
   return new Promise(function (resolve) {
     try {
-      var runtime =
-        typeof chrome !== 'undefined' && chrome && chrome.runtime ? chrome.runtime : null;
+      var runtime = getSafeRuntime();
 
-      if (!runtime || !runtime.id || typeof runtime.sendMessage !== 'function') {
+      if (!runtime || typeof runtime.sendMessage !== 'function') {
         resolve({ ok: false, error: 'Extension runtime unavailable.' });
         return;
       }
 
+      var settled = false;
+      function finish(result) {
+        if (!settled) {
+          settled = true;
+          resolve(result);
+        }
+      }
+
       runtime.sendMessage(message, function (response) {
         try {
-          // Runtime can disappear between send and callback when extension reloads.
-          if (!runtime || !runtime.id) {
-            resolve({ ok: false, error: 'Extension runtime unavailable during callback.' });
+          // Extension context may be torn down between send and callback.
+          var callbackRuntime = getSafeRuntime();
+          if (!callbackRuntime) {
+            finish({ ok: false, error: 'Extension runtime unavailable during callback.' });
             return;
           }
 
-          var lastError = runtime.lastError;
+          var lastError = callbackRuntime.lastError;
           if (lastError) {
-            resolve({ ok: false, error: lastError.message });
+            finish({ ok: false, error: lastError.message });
             return;
           }
 
-          resolve(response || {});
+          finish(response || {});
         } catch (callbackError) {
-          resolve({
+          finish({
             ok: false,
             error:
               callbackError && callbackError.message
@@ -358,6 +380,12 @@ function debugAutoSave(stage, data) {
   };
 
   console.log('[leet-questions][autosave]', payload);
+  // Mirror LeetHub 3.0 style: guard runtime before extension API usage.
+  var runtime = getSafeRuntime();
+  if (!runtime) {
+    return;
+  }
+
   runtimeSend({ type: 'autosaveDebug', payload: payload });
 }
 
@@ -416,11 +444,19 @@ async function tryAutoSave() {
       return;
     }
 
-    var dedupeKey = [
-      payload.data.slug,
-      payload.data.language,
-      fastHash(payload.data.code || ''),
-    ].join('|');
+    var problemData = payload && payload.data ? payload.data : null;
+    if (!problemData || typeof problemData !== 'object') {
+      debugAutoSave('collect-failed', {
+        reason: 'Missing problem payload data',
+      });
+      return;
+    }
+
+    problemData.slug = problemData.slug || slugFromUrl(window.location.href);
+    problemData.language = problemData.language || 'Unknown';
+    problemData.code = String(problemData.code || '');
+
+    var dedupeKey = [problemData.slug, problemData.language, fastHash(problemData.code)].join('|');
 
     // If submit started from an already-Accepted page and we did not observe
     // a pending phase, only skip when content is unchanged.
@@ -439,22 +475,25 @@ async function tryAutoSave() {
 
     if (dedupeKey === autoSaveState.lastKey) {
       debugAutoSave('skip-duplicate', {
-        slug: payload.data.slug,
-        language: payload.data.language,
+        slug: problemData.slug,
+        language: problemData.language,
       });
       return;
     }
 
-    autoSaveState.lastKey = dedupeKey;
-    payload.data.autoTriggered = true;
-    payload.data.submissionAccepted = true;
+    problemData.autoTriggered = true;
+    problemData.submissionAccepted = true;
     debugAutoSave('save-start', {
-      slug: payload.data.slug,
-      language: payload.data.language,
-      codeLength: (payload.data.code || '').length,
+      slug: problemData.slug,
+      language: problemData.language,
+      codeLength: problemData.code.length,
     });
-    var response = await runtimeSend({ type: 'saveProblemToGithub', payload: payload.data });
+    var response = await runtimeSend({ type: 'saveProblemToGithub', payload: problemData });
     if (!response || !response.ok) {
+      if (autoSaveState.lastKey === dedupeKey) {
+        // Keep retries possible when save fails due to transient/runtime issues.
+        autoSaveState.lastKey = '';
+      }
       debugAutoSave('save-failed', {
         error: response && response.error ? response.error : 'Unknown save error',
       });
@@ -479,6 +518,7 @@ async function tryAutoSave() {
       readmePath: response.result ? response.result.readmePath : null,
       codePath: response.result ? response.result.codePath : null,
     });
+    autoSaveState.lastKey = dedupeKey;
     autoSaveState.armed = false;
   } catch (error) {
     debugAutoSave('save-exception', {
@@ -608,7 +648,7 @@ function startAcceptedWatcher() {
 // Safe wrapper to guard against extension reload during message handling.
 function setupMessageListener() {
   try {
-    var runtime = typeof chrome !== 'undefined' && chrome && chrome.runtime ? chrome.runtime : null;
+    var runtime = getSafeRuntime();
     if (!runtime || !runtime.onMessage || typeof runtime.onMessage.addListener !== 'function') {
       console.warn('[leet-questions] chrome.runtime.onMessage not available');
       return;
