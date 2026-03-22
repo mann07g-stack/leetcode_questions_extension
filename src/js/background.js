@@ -131,7 +131,12 @@ function fastHash(input) {
 function executeScriptInMainWorld(tabId, func) {
   return new Promise(function (resolve, reject) {
     try {
-      if (typeof chrome === 'undefined' || !chrome || !chrome.scripting || typeof chrome.scripting.executeScript !== 'function') {
+      if (
+        typeof chrome === 'undefined' ||
+        !chrome ||
+        !chrome.scripting ||
+        typeof chrome.scripting.executeScript !== 'function'
+      ) {
         reject(new Error('Extension runtime unavailable for script execution.'));
         return;
       }
@@ -483,7 +488,12 @@ async function startGithubOAuthFlow() {
 
   return new Promise(function (resolve, reject) {
     try {
-      if (typeof chrome === 'undefined' || !chrome || !chrome.tabs || typeof chrome.tabs.create !== 'function') {
+      if (
+        typeof chrome === 'undefined' ||
+        !chrome ||
+        !chrome.tabs ||
+        typeof chrome.tabs.create !== 'function'
+      ) {
         reject(new Error('Extension runtime unavailable for tab creation.'));
         return;
       }
@@ -922,7 +932,10 @@ function setupBackgroundMessageListener() {
       }
     });
   } catch (setupError) {
-    console.warn('[leet-questions] Failed to setup background message listener:', setupError.message);
+    console.warn(
+      '[leet-questions] Failed to setup background message listener:',
+      setupError.message
+    );
   }
 }
 
@@ -963,7 +976,12 @@ function setupTabsUpdateListener() {
             setStorage({ githubOAuthPending: false, githubOAuthTabId: null });
             // Close the auth tab
             try {
-              if (typeof chrome !== 'undefined' && chrome && chrome.tabs && typeof chrome.tabs.remove === 'function') {
+              if (
+                typeof chrome !== 'undefined' &&
+                chrome &&
+                chrome.tabs &&
+                typeof chrome.tabs.remove === 'function'
+              ) {
                 chrome.tabs.remove(tabId, function () {
                   // Suppress errors silently (auth tab may be closed already)
                 });
@@ -997,7 +1015,10 @@ function setupTabsUpdateListener() {
                 });
               })
               .catch(function (err) {
-                console.warn('LeetHub: OAuth completion error:', err && err.message ? err.message : err);
+                console.warn(
+                  'LeetHub: OAuth completion error:',
+                  err && err.message ? err.message : err
+                );
               });
           })
           .catch(function () {});
