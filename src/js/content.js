@@ -14,13 +14,6 @@ function normalizeText(input) {
     .trim();
 }
 
-function getQueryParam(key) {
-  var encoded = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  var query = window.location.search || '';
-  var match = query.match(new RegExp('[?&]' + encoded + '=([^&#]+)'));
-  return match && match[1] ? decodeURIComponent(match[1]) : '';
-}
-
 function slugFromUrl(url) {
   var match = url.match(/\/problems\/([^/]+)\/?/);
   return match && match[1] ? match[1] : 'unknown-problem';
@@ -44,7 +37,8 @@ function findLanguage() {
   var languageText = pickFirstText(selectors);
 
   if (!languageText || languageText === 'Unknown') {
-    var monacoLangEl = document.querySelector('[class*="editor"] [class*="language"]') ||
+    var monacoLangEl =
+      document.querySelector('[class*="editor"] [class*="language"]') ||
       document.querySelector('[data-testid="language-selector"]') ||
       document.querySelector('[class*="lang"]');
     if (monacoLangEl && monacoLangEl.textContent) {

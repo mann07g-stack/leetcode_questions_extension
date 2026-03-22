@@ -17,12 +17,6 @@ function setStorage(values) {
 var GITHUB_OAUTH_CLIENT_ID = '';
 var GITHUB_OAUTH_CLIENT_SECRET = '';
 
-function sleep(ms) {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, ms);
-  });
-}
-
 function toFormBody(payload) {
   var keys = Object.keys(payload || {});
   var parts = [];
@@ -31,30 +25,6 @@ function toFormBody(payload) {
     parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]));
   }
   return parts.join('&');
-}
-
-function launchWebAuthFlow(url) {
-  return new Promise(function (resolve, reject) {
-    chrome.identity.launchWebAuthFlow(
-      {
-        url: url,
-        interactive: true,
-      },
-      function (redirectedTo) {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-
-        if (!redirectedTo) {
-          reject(new Error('GitHub did not return a redirect URL.'));
-          return;
-        }
-
-        resolve(redirectedTo);
-      }
-    );
-  });
 }
 
 function getQueryParam(url, key) {
@@ -87,7 +57,7 @@ async function ensureDefaultRepo(token, username) {
         }
       }
     }
-  } catch (e) {
+  } catch {
     // Fall through to create
   }
 
@@ -97,20 +67,11 @@ async function ensureDefaultRepo(token, username) {
     if (created && created.full_name) {
       return created.full_name;
     }
-  } catch (e) {
+  } catch {
     // Repo may already exist; use fallback
   }
 
   return username ? username + '/leetcode-solutions' : 'leetcode-solutions';
-}
-
-function getDefaultStats() {
-  return {
-    total: 0,
-    easy: 0,
-    medium: 0,
-    hard: 0,
-  };
 }
 
 async function getStats() {
@@ -201,13 +162,13 @@ async function extractCodeFromTab(tabId) {
         }
 
         return '';
-      } catch (error) {
+      } catch {
         return '';
       }
     });
 
     return String(code || '');
-  } catch (error) {
+  } catch {
     return '';
   }
 }
@@ -331,7 +292,7 @@ async function githubRequest(url, options) {
   var json = {};
   try {
     json = text ? JSON.parse(text) : {};
-  } catch (e) {
+  } catch {
     json = { raw: text };
   }
   return { response: response, json: json };
