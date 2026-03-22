@@ -282,16 +282,21 @@ async function getProblemData() {
   };
 }
 
-var autoSaveState = {
-  working: false,
-  lastKey: '',
-  armed: false,
-  armedAt: 0,
-  seenPendingAfterSubmit: false,
-  preSubmitStatus: 'unknown',
-  lastObservedStatus: 'unknown',
-};
+var _leetQuestionsRoot = typeof globalThis !== 'undefined' ? globalThis : window;
 
+if (!_leetQuestionsRoot.__leetQuestionsAutoSaveState) {
+  _leetQuestionsRoot.__leetQuestionsAutoSaveState = {
+    working: false,
+    lastKey: '',
+    armed: false,
+    armedAt: 0,
+    seenPendingAfterSubmit: false,
+    preSubmitStatus: 'unknown',
+    lastObservedStatus: 'unknown',
+  };
+}
+
+var autoSaveState = _leetQuestionsRoot.__leetQuestionsAutoSaveState;
 var AUTO_SAVE_DEBUG = true;
 
 function runtimeSend(message) {
@@ -481,6 +486,11 @@ function startAcceptedWatcher() {
   if (!document.body) {
     return;
   }
+
+  if (_leetQuestionsRoot.__leetQuestionsWatcherStarted) {
+    return;
+  }
+  _leetQuestionsRoot.__leetQuestionsWatcherStarted = true;
 
   document.addEventListener(
     'click',
