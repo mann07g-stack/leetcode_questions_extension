@@ -14,8 +14,8 @@ function setStorage(values) {
   });
 }
 
-var GITHUB_OAUTH_CLIENT_ID = 'beb4f0aa19ab8faf5004';
-var GITHUB_OAUTH_CLIENT_SECRET = '843f835609c7ef02ef0f2f1645bc49514c0e65a6';
+var GITHUB_OAUTH_CLIENT_ID = '';
+var GITHUB_OAUTH_CLIENT_SECRET = '';
 
 function sleep(ms) {
   return new Promise(function (resolve) {

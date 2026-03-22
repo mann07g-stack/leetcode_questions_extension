@@ -2,7 +2,7 @@
 
 Chrome extension (Manifest V3) to capture the current LeetCode problem and save it to GitHub.
 
-## Project Structure (LeetHub-3.0 style)
+## Project Structure
 
 - `src/html` for extension pages
 - `src/css` for stylesheets
