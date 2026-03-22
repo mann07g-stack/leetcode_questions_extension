@@ -324,6 +324,23 @@ function runtimeSend(message) {
         return;
       }
 
+      // Debug events should never block autosave flow.
+      if (message && message.type === 'autosaveDebug') {
+        try {
+          runtime.sendMessage(message);
+          resolve({ ok: true, fireAndForget: true });
+        } catch (debugSendError) {
+          resolve({
+            ok: false,
+            error:
+              debugSendError && debugSendError.message
+                ? debugSendError.message
+                : 'Failed to send debug message.',
+          });
+        }
+        return;
+      }
+
       var settled = false;
       function finish(result) {
         if (!settled) {
@@ -332,8 +349,14 @@ function runtimeSend(message) {
         }
       }
 
-      runtime.sendMessage(message, function (response) {
+      // Prevent hanging forever if callback is never delivered.
+      var timeoutId = setTimeout(function () {
+        finish({ ok: false, error: 'Runtime message timeout.' });
+      }, 4000);
+
+      function onRuntimeResponse(response) {
         try {
+          clearTimeout(timeoutId);
           // Extension context may be torn down between send and callback.
           var callbackRuntime = getSafeRuntime();
           if (!callbackRuntime) {
@@ -357,7 +380,9 @@ function runtimeSend(message) {
                 : 'Failed to process runtime callback.',
           });
         }
-      });
+      }
+
+      runtime.sendMessage(message, onRuntimeResponse);
     } catch (error) {
       resolve({
         ok: false,
