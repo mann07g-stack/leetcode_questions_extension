@@ -1,10 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "LeetCode Questions Extension",
+  "name": "leet Questions",
   "version": "1.0.0",
-  "description": "Save LeetCode problem notes directly to a GitHub repository.",
+  "description": "Stop losing your progress and start building your developer portfolio. leet Questions automatically pushes your accepted LeetCode solutions to a GitHub repository of your choice.",
+  "author": "Mann Gupta",
   "action": {
+    "default_icon": "assets/image.jpg",
     "default_popup": "src/html/popup.html"
+  },
+  "icons": {
+    "16": "assets/image.jpg",
+    "48": "assets/image.jpg",
+    "128": "assets/image.jpg"
   },
   "permissions": ["storage", "activeTab", "tabs", "scripting", "identity"],
   "host_permissions": [

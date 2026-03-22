@@ -1,6 +1,6 @@
-# LeetCode Questions Extension
+# leet Questions
 
-Chrome extension (Manifest V3) to capture the current LeetCode problem and save it to GitHub.
+Stop losing your progress and start building your developer portfolio. leet Questions automatically pushes your accepted LeetCode solutions to a GitHub repository of your choice. Every time you hit "Submit" and pass, your code is committed and organized, turning your daily practice into a visible streak of contributions on your GitHub profile.
 
 ## Project Structure
 
@@ -11,50 +11,41 @@ Chrome extension (Manifest V3) to capture the current LeetCode problem and save 
 
 ## NPM Tooling
 
-This project now uses npm scripts for formatting and linting.
-
 ```bash
 npm install
 npm run format
 npm run lint
 ```
 
-## What It Saves
+## GitHub OAuth Setup (User-Self Auth)
 
-- Problem metadata and statement to:
-  - `<folder>/<problem-slug>/README.md`
-- Your current editor code (if detected) to:
-  - `<folder>/<problem-slug>/solution.<ext>`
+Every user should create their own GitHub OAuth app and enter their own credentials in the extension popup.
 
-## What You Must Add
-
-1. A GitHub personal access token
-   - Classic token: include `repo` scope
-   - Fine-grained token: give `Contents` read/write on the target repo
-2. A target repository in `owner/repo` format
-3. Optional branch name (defaults to `main`)
-4. Optional folder name (defaults to `problems`)
+1. Open `https://github.com/settings/developers`
+2. Go to OAuth Apps and click New OAuth App
+3. Use any app name (for example: leet Questions)
+4. Set Authorization callback URL to exactly `https://github.com/`
+5. Create the app and copy Client ID and Client Secret
+6. Open extension popup and expand OAuth App Setup
+7. Paste Client ID and Client Secret
+8. Click Save OAuth Credentials
+9. Click Connect GitHub and authorize
 
 ## Extension Setup
 
 1. Open `chrome://extensions`
 2. Enable Developer mode
 3. Click Load unpacked and choose this repository folder
-4. Open the extension popup and fill:
-   - GitHub token
-   - Repository (`owner/repo`)
-   - Branch (optional)
-   - Folder (optional)
-5. Click Save Settings
+4. Open the extension popup and connect GitHub using your own OAuth app credentials
+5. Select an existing repository or create a new repository
+6. Save settings
 
-## Usage
+## What Gets Saved
 
-1. Open a LeetCode problem page (example: `https://leetcode.com/problems/two-sum/`)
-2. Ensure your code is visible in the editor
-3. Click the extension icon
-4. Click Save Current Problem
+- Problem metadata and statement to `<folder>/<problem-slug>/README.md`
+- Solution code to `<folder>/<problem-slug>/solution.<ext>`
 
-## Notes
+## Temporary Logo
 
-- If code is not detected, the extension still saves README and reports that solution was not found.
-- If LeetCode updates its DOM/editor internals, selectors or extraction logic in `src/js/content.js` may need an update.
+Current icon file is `assets/image.jpg` as a temporary placeholder.
+Replace this file with your final logo image when ready.

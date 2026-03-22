@@ -1,9 +1,9 @@
 {
-  "name": "leetcode-questions-extension",
+  "name": "leet-questions",
   "version": "1.1.0",
   "type": "module",
   "private": true,
-  "description": "Automatically commit LeetCode question and answer files to GitHub",
+  "description": "Stop losing your progress and start building your developer portfolio with automatic accepted LeetCode solution sync to GitHub.",
   "scripts": {
     "setup": "npm i",
     "format": "prettier --write **/*.{js,css,html,json,md}",
