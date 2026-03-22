@@ -33,6 +33,28 @@ function isLikelyProblemPage() {
   return /leetcode\.com\/problems\//.test(window.location.href);
 }
 
+function sanitizeLanguageCandidate(text) {
+  var candidate = String(text || '')
+    .replace(/[\u25be\u25bc\u2304]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!candidate) {
+    return '';
+  }
+
+  // Guard against accidentally capturing editor code as "language".
+  if (
+    candidate.length > 40 ||
+    candidate.indexOf('\n') !== -1 ||
+    /\b(def|class|return|function|SELECT|INSERT|UPDATE|DELETE)\b/.test(candidate)
+  ) {
+    return '';
+  }
+
+  return candidate;
+}
+
 function findLanguage() {
   var selectors = [
     'button[data-cy="lang-select"]',
@@ -44,15 +66,28 @@ function findLanguage() {
     '[role="button"][data-testid="lang"]',
   ];
 
-  var languageText = pickFirstText(selectors);
+  var languageText = sanitizeLanguageCandidate(pickFirstText(selectors));
 
   if (!languageText || languageText === 'Unknown') {
     var monacoLangEl =
       document.querySelector('[class*="editor"] [class*="language"]') ||
       document.querySelector('[data-testid="language-selector"]') ||
-      document.querySelector('[class*="lang"]');
+      document.querySelector('[data-e2e-locator*="language"]');
     if (monacoLangEl && monacoLangEl.textContent) {
-      languageText = monacoLangEl.textContent;
+      languageText = sanitizeLanguageCandidate(monacoLangEl.textContent);
+    }
+  }
+
+  if (!languageText) {
+    var ariaLabelSources = document.querySelectorAll('[aria-label*="language" i]');
+    for (var i = 0; i < ariaLabelSources.length; i += 1) {
+      var ariaCandidate = sanitizeLanguageCandidate(
+        ariaLabelSources[i].innerText || ariaLabelSources[i].textContent || ''
+      );
+      if (ariaCandidate) {
+        languageText = ariaCandidate;
+        break;
+      }
     }
   }
 
@@ -60,12 +95,7 @@ function findLanguage() {
     return 'Unknown';
   }
 
-  var cleaned = String(languageText)
-    .replace(/[\u25be\u25bc\u2304]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return cleaned || 'Unknown';
+  return languageText;
 }
 
 function getSubmissionStatusFromPage() {

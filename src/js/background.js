@@ -275,6 +275,34 @@ function languageToExtension(language) {
   return map[normalized] || null;
 }
 
+function inferExtensionFromCode(code) {
+  var text = String(code || '').trim();
+  if (!text) {
+    return null;
+  }
+
+  if (/^\s*def\s+\w+\s*\(|^\s*class\s+\w+\s*[:(]/m.test(text)) {
+    return '.py';
+  }
+  if (/^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i.test(text)) {
+    return '.sql';
+  }
+  if (/^\s*#include\s*<|\bstd::\w+/m.test(text)) {
+    return '.cpp';
+  }
+  if (/^\s*public\s+class\b|\bSystem\.out\.println\b/m.test(text)) {
+    return '.java';
+  }
+  if (/^\s*function\s+\w+\s*\(|\bconsole\.log\(|=>/m.test(text)) {
+    return '.js';
+  }
+  if (/^\s*package\s+main\b|\bfmt\.Println\(/m.test(text)) {
+    return '.go';
+  }
+
+  return null;
+}
+
 function buildMarkdown(problem) {
   var lines = [];
   lines.push('# ' + problem.title);
@@ -503,6 +531,9 @@ async function saveProblemToGithub(problem, tabId) {
   }
 
   var fileExtension = languageToExtension(finalProblem.language);
+  if (!fileExtension) {
+    fileExtension = inferExtensionFromCode(finalProblem.code);
+  }
   if (!fileExtension) {
     throw new Error('Unsupported language for auto-save: ' + String(finalProblem.language || ''));
   }
