@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LeetCode Sync Hub</title>
-    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="../css/popup.css" />
   </head>
   <body>
     <main class="shell">
@@ -27,7 +27,12 @@
 
       <details id="oauthSetup" class="panel">
         <summary>&#9881; OAuth App Setup <small class="muted">(first-time only)</small></summary>
-        <p class="muted setup-hint">1. Go to <strong>github.com/settings/developers</strong> &rarr; New OAuth App<br>2. Set <strong>Authorization callback URL</strong> to exactly: <strong>https://github.com/</strong><br>3. Paste your Client&nbsp;ID and Client&nbsp;Secret below and save. (One-time setup)</p>
+        <p class="muted setup-hint">
+          1. Go to <strong>github.com/settings/developers</strong> &rarr; New OAuth App<br />2. Set
+          <strong>Authorization callback URL</strong> to exactly:
+          <strong>https://github.com/</strong><br />3. Paste your Client&nbsp;ID and
+          Client&nbsp;Secret below and save. (One-time setup)
+        </p>
         <label>Callback URL (paste this into your GitHub OAuth App)</label>
         <input id="oauthRedirectUrl" type="text" readonly value="https://github.com/" />
         <label for="oauthClientId">Client ID</label>
@@ -98,6 +103,6 @@
       <p id="status" aria-live="polite" class="status"></p>
     </main>
 
-    <script src="popup.js"></script>
+    <script src="../js/popup.js"></script>
   </body>
 </html>

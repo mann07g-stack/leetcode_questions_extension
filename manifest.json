@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Save LeetCode problem notes directly to a GitHub repository.",
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "src/html/popup.html"
   },
   "permissions": ["storage", "activeTab", "tabs", "scripting", "identity"],
   "host_permissions": [
@@ -13,12 +13,12 @@
     "https://api.github.com/*"
   ],
   "background": {
-    "service_worker": "scripts/background.js"
+    "service_worker": "src/js/background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://leetcode.com/problems/*", "https://leetcode.com/*"],
-      "js": ["scripts/content.js"],
+      "js": ["src/js/content.js"],
       "run_at": "document_idle"
     }
   ]

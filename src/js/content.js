@@ -9,7 +9,9 @@ function pickFirstText(selectors) {
 }
 
 function normalizeText(input) {
-  return String(input || '').replace(/\s+/g, ' ').trim();
+  return String(input || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getQueryParam(key) {
@@ -34,7 +36,7 @@ function findLanguage() {
     'div[data-cy="lang-select"]',
     '[id*="headlessui-listbox-button"]',
     '[class*="language-select"] button',
-    '[class*="lang-select"] button'
+    '[class*="lang-select"] button',
   ]);
 
   if (!languageText) {
@@ -52,7 +54,7 @@ function findDifficulty() {
     'div.text-difficulty-easy',
     'div.text-difficulty-medium',
     'div.text-difficulty-hard',
-    '[class*="text-difficulty"]'
+    '[class*="text-difficulty"]',
   ]);
 
   var normalized = normalizeText(difficultyText).toLowerCase();
@@ -70,11 +72,7 @@ function findDifficulty() {
 }
 
 function findTitle() {
-  var title = pickFirstText([
-    'div.text-title-large a',
-    '[data-cy="question-title"]',
-    'h1'
-  ]);
+  var title = pickFirstText(['div.text-title-large a', '[data-cy="question-title"]', 'h1']);
 
   return normalizeText(title);
 }
@@ -113,7 +111,8 @@ async function getProblemData() {
   var title = findTitle();
   var difficulty = findDifficulty();
 
-  var statementEl = document.querySelector('[data-track-load="description_content"]') ||
+  var statementEl =
+    document.querySelector('[data-track-load="description_content"]') ||
     document.querySelector('.elfjS') ||
     document.querySelector('div[data-key="description-content"]');
 
@@ -134,8 +133,8 @@ async function getProblemData() {
       statement: statement || 'Statement was not detected on the current page.',
       language: findLanguage(),
       code: code || '',
-      savedAt: new Date().toISOString()
-    }
+      savedAt: new Date().toISOString(),
+    },
   };
 }
 
@@ -168,7 +167,7 @@ function hasFailedSubmissionOnPage() {
     'runtime error',
     'compile error',
     'memory limit exceeded',
-    'output limit exceeded'
+    'output limit exceeded',
   ];
 
   for (var i = 0; i < failures.length; i += 1) {
@@ -183,7 +182,7 @@ function hasFailedSubmissionOnPage() {
 var autoSaveState = {
   working: false,
   lastKey: '',
-  armed: false
+  armed: false,
 };
 
 function runtimeSend(message) {
@@ -219,7 +218,11 @@ async function tryAutoSave() {
       return;
     }
 
-    var dedupeKey = [payload.data.slug, payload.data.language, (payload.data.code || '').length].join('|');
+    var dedupeKey = [
+      payload.data.slug,
+      payload.data.language,
+      (payload.data.code || '').length,
+    ].join('|');
     if (dedupeKey === autoSaveState.lastKey) {
       return;
     }
@@ -228,7 +231,10 @@ async function tryAutoSave() {
     payload.data.autoTriggered = true;
     var response = await runtimeSend({ type: 'saveProblemToGithub', payload: payload.data });
     if (!response || !response.ok) {
-      console.warn('Auto-save failed:', response && response.error ? response.error : 'Unknown save error');
+      console.warn(
+        'Auto-save failed:',
+        response && response.error ? response.error : 'Unknown save error'
+      );
       return;
     }
 
@@ -263,15 +269,19 @@ function startAcceptedWatcher() {
     return;
   }
 
-  document.addEventListener('click', function (event) {
-    if (!isLikelyProblemPage()) {
-      return;
-    }
+  document.addEventListener(
+    'click',
+    function (event) {
+      if (!isLikelyProblemPage()) {
+        return;
+      }
 
-    if (isSubmitTrigger(event.target)) {
-      autoSaveState.armed = true;
-    }
-  }, true);
+      if (isSubmitTrigger(event.target)) {
+        autoSaveState.armed = true;
+      }
+    },
+    true
+  );
 
   var observer = new MutationObserver(function () {
     tryAutoSave();
@@ -280,7 +290,7 @@ function startAcceptedWatcher() {
   observer.observe(document.body, {
     childList: true,
     subtree: true,
-    characterData: true
+    characterData: true,
   });
 
   setInterval(function () {

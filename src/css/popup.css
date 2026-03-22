@@ -6,7 +6,7 @@ body {
   margin: 0;
   width: 400px;
   min-height: 560px;
-  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  font-family: 'Space Grotesk', 'Trebuchet MS', sans-serif;
   color: #f3f7ff;
   background:
     radial-gradient(circle at 15% 20%, rgba(86, 114, 250, 0.28), transparent 45%),
@@ -169,7 +169,9 @@ button {
   cursor: pointer;
   font-weight: 600;
   font-size: 12px;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
 }
 
 button:hover {

@@ -38,7 +38,7 @@ function launchWebAuthFlow(url) {
     chrome.identity.launchWebAuthFlow(
       {
         url: url,
-        interactive: true
+        interactive: true,
       },
       function (redirectedTo) {
         if (chrome.runtime.lastError) {
@@ -71,7 +71,7 @@ async function getOAuthConfig() {
   var stored = await getStorage(['githubOAuthClientId', 'githubOAuthClientSecret']);
   return {
     clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
-    clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET
+    clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET,
   };
 }
 
@@ -101,7 +101,7 @@ async function ensureDefaultRepo(token, username) {
     // Repo may already exist; use fallback
   }
 
-  return username ? (username + '/leetcode-solutions') : 'leetcode-solutions';
+  return username ? username + '/leetcode-solutions' : 'leetcode-solutions';
 }
 
 function getDefaultStats() {
@@ -109,7 +109,7 @@ function getDefaultStats() {
     total: 0,
     easy: 0,
     medium: 0,
-    hard: 0
+    hard: 0,
   };
 }
 
@@ -120,7 +120,7 @@ async function getStats() {
     total: Number(stats.total) || 0,
     easy: Number(stats.easy) || 0,
     medium: Number(stats.medium) || 0,
-    hard: Number(stats.hard) || 0
+    hard: Number(stats.hard) || 0,
   };
 }
 
@@ -157,7 +157,7 @@ function executeScriptInMainWorld(tabId, func) {
       {
         target: { tabId: tabId },
         world: 'MAIN',
-        func: func
+        func: func,
       },
       function (results) {
         if (chrome.runtime.lastError) {
@@ -184,7 +184,11 @@ async function extractCodeFromTab(tabId) {
   try {
     var code = await executeScriptInMainWorld(tabId, function () {
       try {
-        if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getModels === 'function') {
+        if (
+          window.monaco &&
+          window.monaco.editor &&
+          typeof window.monaco.editor.getModels === 'function'
+        ) {
           var models = window.monaco.editor.getModels();
           if (models && models.length && models[0] && typeof models[0].getValue === 'function') {
             return models[0].getValue() || '';
@@ -247,7 +251,7 @@ function languageToExtension(language) {
     csharp: '.cs',
     mysql: '.sql',
     mssql: '.sql',
-    oracle: '.sql'
+    oracle: '.sql',
   };
 
   var key = normalizeLanguage(language).replace(/\s+/g, '');
@@ -286,8 +290,8 @@ async function githubApiWithToken(token, url, method, body) {
     method: method || 'GET',
     headers: {
       Authorization: 'token ' + token,
-      Accept: 'application/vnd.github+json'
-    }
+      Accept: 'application/vnd.github+json',
+    },
   };
 
   if (body !== undefined) {
@@ -317,17 +321,12 @@ async function listGithubRepos(token) {
 }
 
 async function createGithubRepo(token, name, isPrivate) {
-  return githubApiWithToken(
-    token,
-    'https://api.github.com/user/repos',
-    'POST',
-    {
-      name: name,
-      private: Boolean(isPrivate),
-      auto_init: true,
-      description: 'LeetCode progress repository created by LeetCode Questions Extension'
-    }
-  );
+  return githubApiWithToken(token, 'https://api.github.com/user/repos', 'POST', {
+    name: name,
+    private: Boolean(isPrivate),
+    auto_init: true,
+    description: 'LeetCode progress repository created by LeetCode Questions Extension',
+  });
 }
 
 async function exchangeCodeForAccessToken(code, redirectUri, oauthConfig) {
@@ -335,26 +334,30 @@ async function exchangeCodeForAccessToken(code, redirectUri, oauthConfig) {
     method: 'POST',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded'
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: toFormBody({
       client_id: oauthConfig.clientId,
       client_secret: oauthConfig.clientSecret,
       code: code,
-      redirect_uri: redirectUri
-    })
+      redirect_uri: redirectUri,
+    }),
   });
 
   if (!tokenResponse.response.ok) {
-    var tokenHttpError = tokenResponse.json && tokenResponse.json.error_description
-      ? tokenResponse.json.error_description
-      : 'Failed to exchange GitHub authorization code.';
+    var tokenHttpError =
+      tokenResponse.json && tokenResponse.json.error_description
+        ? tokenResponse.json.error_description
+        : 'Failed to exchange GitHub authorization code.';
     throw new Error(tokenHttpError);
   }
 
   var tokenPayload = tokenResponse.json || {};
   if (!tokenPayload.access_token) {
-    var tokenError = tokenPayload.error_description || tokenPayload.error || 'GitHub did not return an access token.';
+    var tokenError =
+      tokenPayload.error_description ||
+      tokenPayload.error ||
+      'GitHub did not return an access token.';
     throw new Error(tokenError);
   }
 
@@ -366,17 +369,23 @@ var OAUTH_REDIRECT_URI = 'https://github.com/';
 async function startGithubOAuthFlow() {
   var oauthConfig = await getOAuthConfig();
   if (!oauthConfig.clientId || !oauthConfig.clientSecret) {
-    throw new Error('OAuth credentials missing. Expand "OAuth App Setup" in the popup to configure.');
+    throw new Error(
+      'OAuth credentials missing. Expand "OAuth App Setup" in the popup to configure.'
+    );
   }
 
   var state = createOAuthState();
 
   var authorizeUrl =
     'https://github.com/login/oauth/authorize' +
-    '?client_id=' + encodeURIComponent(oauthConfig.clientId) +
-    '&redirect_uri=' + encodeURIComponent(OAUTH_REDIRECT_URI) +
-    '&scope=' + encodeURIComponent('public_repo') +
-    '&state=' + encodeURIComponent(state);
+    '?client_id=' +
+    encodeURIComponent(oauthConfig.clientId) +
+    '&redirect_uri=' +
+    encodeURIComponent(OAUTH_REDIRECT_URI) +
+    '&scope=' +
+    encodeURIComponent('public_repo') +
+    '&state=' +
+    encodeURIComponent(state);
 
   return new Promise(function (resolve, reject) {
     chrome.tabs.create({ url: authorizeUrl, active: true }, function (tab) {
@@ -390,7 +399,7 @@ async function startGithubOAuthFlow() {
         githubOAuthState: state,
         githubOAuthTabId: tab.id,
         githubOAuthClientId: oauthConfig.clientId,
-        githubOAuthClientSecret: oauthConfig.clientSecret
+        githubOAuthClientSecret: oauthConfig.clientSecret,
       })
         .then(function () {
           resolve({ started: true, awaitingCallback: true });
@@ -403,7 +412,7 @@ async function startGithubOAuthFlow() {
 async function upsertGithubFile(params) {
   var headers = {
     Authorization: 'token ' + params.token,
-    Accept: 'application/vnd.github+json'
+    Accept: 'application/vnd.github+json',
   };
 
   var encodedPath = params.path.split('/').map(encodeURIComponent).join('/');
@@ -411,7 +420,7 @@ async function upsertGithubFile(params) {
 
   var existing = await githubRequest(apiUrl + '?ref=' + encodeURIComponent(params.branch), {
     method: 'GET',
-    headers: headers
+    headers: headers,
   });
 
   var existed = existing.response.ok && existing.json && existing.json.sha;
@@ -419,7 +428,7 @@ async function upsertGithubFile(params) {
   var payload = {
     message: params.message,
     content: toBase64Unicode(params.content),
-    branch: params.branch
+    branch: params.branch,
   };
 
   if (existing.response.ok && existing.json && existing.json.sha) {
@@ -431,18 +440,19 @@ async function upsertGithubFile(params) {
     headers: {
       Authorization: headers.Authorization,
       Accept: headers.Accept,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 
   if (!writeResult.response.ok) {
-    var message = writeResult.json && writeResult.json.message ? writeResult.json.message : 'GitHub API error';
+    var message =
+      writeResult.json && writeResult.json.message ? writeResult.json.message : 'GitHub API error';
     throw new Error('GitHub API error (' + writeResult.response.status + '): ' + message);
   }
 
   return {
-    created: !existed
+    created: !existed,
   };
 }
 
@@ -467,7 +477,7 @@ async function saveProblemToGithub(problem, tabId) {
     var autoKey = [
       normalizePathSegment(finalProblem.slug || ''),
       normalizeLanguage(finalProblem.language || ''),
-      fastHash(finalProblem.code || '')
+      fastHash(finalProblem.code || ''),
     ].join('|');
 
     if (autoState.lastAutoSaveKey === autoKey) {
@@ -476,7 +486,7 @@ async function saveProblemToGithub(problem, tabId) {
         codePath: null,
         skipped: true,
         reason: 'Duplicate auto-save ignored.',
-        stats: await getStats()
+        stats: await getStats(),
       };
     }
 
@@ -494,7 +504,7 @@ async function saveProblemToGithub(problem, tabId) {
     branch: branch,
     path: readmePath,
     content: markdownContent,
-    message: 'docs: save ' + finalProblem.title
+    message: 'docs: save ' + finalProblem.title,
   });
 
   var codePath = null;
@@ -507,7 +517,7 @@ async function saveProblemToGithub(problem, tabId) {
       branch: branch,
       path: codePath,
       content: finalProblem.code,
-      message: 'code: save ' + finalProblem.title + ' solution'
+      message: 'code: save ' + finalProblem.title + ' solution',
     });
   }
 
@@ -519,7 +529,7 @@ async function saveProblemToGithub(problem, tabId) {
   return {
     readmePath: readmePath,
     codePath: codePath,
-    stats: stats
+    stats: stats,
   };
 }
 
@@ -539,7 +549,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         sendResponse({
           ok: true,
           connected: Boolean(state.githubToken),
-          username: state.githubUsername || ''
+          username: state.githubUsername || '',
         });
       })
       .catch(function (error) {
@@ -578,7 +588,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     setStorage({
       githubToken: '',
       githubUsername: '',
-      githubRepo: ''
+      githubRepo: '',
     })
       .then(function () {
         sendResponse({ ok: true });
@@ -603,7 +613,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
               return {
                 name: repo.name,
                 full_name: repo.full_name,
-                private: Boolean(repo.private)
+                private: Boolean(repo.private),
               };
             })
           : [];
@@ -643,8 +653,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
           repo: {
             name: repo.name,
             full_name: repo.full_name,
-            private: Boolean(repo.private)
-          }
+            private: Boolean(repo.private),
+          },
         });
       })
       .catch(function (error) {
@@ -674,8 +684,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             lastAutoSaveStatus: {
               ok: true,
               at: new Date().toISOString(),
-              message: 'Auto-save successful.'
-            }
+              message: 'Auto-save successful.',
+            },
           });
         }
         sendResponse({ ok: true, result: result });
@@ -686,8 +696,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             lastAutoSaveStatus: {
               ok: false,
               at: new Date().toISOString(),
-              message: error.message || 'Failed to save problem.'
-            }
+              message: error.message || 'Failed to save problem.',
+            },
           });
         }
         sendResponse({ ok: false, error: error.message || 'Failed to save problem.' });
@@ -704,7 +714,13 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
     return;
   }
 
-  getStorage(['githubOAuthPending', 'githubOAuthState', 'githubOAuthTabId', 'githubOAuthClientId', 'githubOAuthClientSecret'])
+  getStorage([
+    'githubOAuthPending',
+    'githubOAuthState',
+    'githubOAuthTabId',
+    'githubOAuthClientId',
+    'githubOAuthClientSecret',
+  ])
     .then(function (stored) {
       if (!stored.githubOAuthPending || stored.githubOAuthTabId !== tabId) {
         return;
@@ -717,7 +733,9 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
       // Immediately clear pending so we don't re-process
       setStorage({ githubOAuthPending: false, githubOAuthTabId: null });
       // Close the auth tab
-      chrome.tabs.remove(tabId, function () { chrome.runtime.lastError; });
+      chrome.tabs.remove(tabId, function () {
+        chrome.runtime.lastError;
+      });
 
       if (error || !code || returnedState !== stored.githubOAuthState) {
         return;
@@ -725,7 +743,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
 
       var oauthConfig = {
         clientId: stored.githubOAuthClientId || GITHUB_OAUTH_CLIENT_ID,
-        clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET
+        clientSecret: stored.githubOAuthClientSecret || GITHUB_OAUTH_CLIENT_SECRET,
       };
 
       exchangeCodeForAccessToken(code, OAUTH_REDIRECT_URI, oauthConfig)
@@ -738,7 +756,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
                 githubUsername: username,
                 githubRepo: repo,
                 githubBranch: 'main',
-                githubFolder: 'problems'
+                githubFolder: 'problems',
               });
             });
           });

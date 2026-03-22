@@ -49,7 +49,7 @@ function injectContentScript(tabId) {
     chrome.scripting.executeScript(
       {
         target: { tabId: tabId },
-        files: ['scripts/content.js']
+        files: ['src/js/content.js'],
       },
       function () {
         if (chrome.runtime.lastError) {
@@ -163,7 +163,7 @@ function readSettingsFromUI() {
     githubToken: byId('token').value.trim(),
     githubRepo: byId('repo').value.trim(),
     githubBranch: byId('branch').value.trim() || 'main',
-    githubFolder: byId('folder').value.trim() || 'problems'
+    githubFolder: byId('folder').value.trim() || 'problems',
   };
 }
 
@@ -187,7 +187,7 @@ async function handleSaveOAuthConfig() {
 
   var res = await sendRuntimeMessage({
     type: 'saveOAuthConfig',
-    payload: { clientId: clientId, clientSecret: clientSecret }
+    payload: { clientId: clientId, clientSecret: clientSecret },
   });
 
   if (!res.ok) {
@@ -279,8 +279,8 @@ async function handleCreateRepo() {
     type: 'createUserRepo',
     payload: {
       name: name,
-      isPrivate: visibility !== 'public'
-    }
+      isPrivate: visibility !== 'public',
+    },
   });
 
   if (!response.ok) {
@@ -312,7 +312,7 @@ async function handleSaveSettings() {
   var payload = {
     githubRepo: settings.githubRepo,
     githubBranch: settings.githubBranch,
-    githubFolder: settings.githubFolder
+    githubFolder: settings.githubFolder,
   };
   if (settings.githubToken) {
     payload.githubToken = settings.githubToken;
@@ -345,15 +345,21 @@ async function handleSaveProblem() {
 
     var result = await sendRuntimeMessage({
       type: 'saveProblemToGithub',
-      payload: problem.data
+      payload: problem.data,
     });
 
     if (!result.ok) {
-      setStatus((result.error || 'GitHub save failed.') + ' Check token/repo/branch permissions.', true);
+      setStatus(
+        (result.error || 'GitHub save failed.') + ' Check token/repo/branch permissions.',
+        true
+      );
       return;
     }
 
-    var readmePath = result.result && result.result.readmePath ? result.result.readmePath : 'README path unavailable';
+    var readmePath =
+      result.result && result.result.readmePath
+        ? result.result.readmePath
+        : 'README path unavailable';
     var codePath = result.result && result.result.codePath ? result.result.codePath : null;
     if (result.result && result.result.stats) {
       updateStatsUI(result.result.stats);
@@ -372,12 +378,7 @@ async function handleSaveProblem() {
 }
 
 async function init() {
-  var saved = await getStorage([
-    'githubToken',
-    'githubRepo',
-    'githubBranch',
-    'githubFolder'
-  ]);
+  var saved = await getStorage(['githubToken', 'githubRepo', 'githubBranch', 'githubFolder']);
 
   byId('token').value = saved.githubToken || '';
   byId('repo').value = saved.githubRepo || '';
