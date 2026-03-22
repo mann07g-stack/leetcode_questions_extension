@@ -323,58 +323,7 @@ async function handleSaveSettings() {
 }
 
 async function handleSaveProblem() {
-  try {
-    var tab = await queryActiveTab();
-    if (!tab || !tab.id || !tab.url || tab.url.indexOf('leetcode.com/problems/') === -1) {
-      setStatus('Open a LeetCode problem page first.', true);
-      return;
-    }
-
-    var problem = null;
-    try {
-      problem = await sendTabMessage(tab.id, { type: 'collectProblemData' });
-    } catch (firstError) {
-      await injectContentScript(tab.id);
-      problem = await sendTabMessage(tab.id, { type: 'collectProblemData' });
-    }
-
-    if (!problem || !problem.ok) {
-      setStatus((problem && problem.error) || 'Could not read problem data from page.', true);
-      return;
-    }
-
-    var result = await sendRuntimeMessage({
-      type: 'saveProblemToGithub',
-      payload: problem.data,
-    });
-
-    if (!result.ok) {
-      setStatus(
-        (result.error || 'GitHub save failed.') + ' Check token/repo/branch permissions.',
-        true
-      );
-      return;
-    }
-
-    var readmePath =
-      result.result && result.result.readmePath
-        ? result.result.readmePath
-        : 'README path unavailable';
-    var codePath = result.result && result.result.codePath ? result.result.codePath : null;
-    if (result.result && result.result.stats) {
-      updateStatsUI(result.result.stats);
-    } else {
-      await refreshStats();
-    }
-
-    if (codePath) {
-      setStatus('Saved: ' + readmePath + ' and ' + codePath, false);
-    } else {
-      setStatus('Saved: ' + readmePath + ' (solution code not detected on page)', false);
-    }
-  } catch (error) {
-    setStatus(error.message || 'Unexpected error.', true);
-  }
+  setStatus('Manual save is disabled. Submit on LeetCode; accepted solutions auto-save only.', true);
 }
 
 async function init() {
@@ -393,6 +342,8 @@ async function init() {
   byId('saveSettings').addEventListener('click', handleSaveSettings);
   byId('saveProblem').addEventListener('click', handleSaveProblem);
   byId('saveOAuthConfig').addEventListener('click', handleSaveOAuthConfig);
+
+  byId('saveProblem').textContent = 'Auto-save Only';
 
   await loadOAuthSetup();
   await refreshStats();

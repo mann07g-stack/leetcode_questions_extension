@@ -50,9 +50,55 @@ function findLanguage() {
     return 'Unknown';
   }
 
-  var cleaned = languageText.replace(/\s+/g, ' ').trim().split(/[\s,]/)[0];
+  var cleaned = String(languageText)
+    .replace(/[\u25be\u25bc\u2304]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   return cleaned || 'Unknown';
+}
+
+function getSubmissionStatusFromPage() {
+  if (!document.body) {
+    return 'unknown';
+  }
+
+  var pageText = normalizeText(document.body.innerText).toLowerCase();
+  if (!pageText) {
+    return 'unknown';
+  }
+
+  var failedSignals = [
+    'wrong answer',
+    'time limit exceeded',
+    'runtime error',
+    'compile error',
+    'memory limit exceeded',
+    'output limit exceeded',
+    'presentation error',
+  ];
+
+  for (var i = 0; i < failedSignals.length; i += 1) {
+    if (pageText.indexOf(failedSignals[i]) !== -1) {
+      return 'failed';
+    }
+  }
+
+  var acceptedRegex = /\baccepted\b(?!\s*rate)/i;
+  var acceptanceRegex = /\bacceptance\b/i;
+  var acceptedWithContext =
+    /\baccepted\b[^]{0,140}\b(runtime|memory|beats|testcase|testcases|cases\s+passed)\b/i.test(
+      pageText
+    ) ||
+    /\b(runtime|memory|beats|testcase|testcases|cases\s+passed)\b[^]{0,140}\baccepted\b/i.test(
+      pageText
+    );
+
+  if (acceptedWithContext || (acceptedRegex.test(pageText) && !acceptanceRegex.test(pageText))) {
+    return 'accepted';
+  }
+
+  return 'unknown';
 }
 
 function findDifficulty() {
@@ -148,50 +194,18 @@ async function getProblemData() {
 }
 
 function maybeAcceptedOnPage() {
-  if (!document.body) {
-    return false;
-  }
-
-  var pageText = normalizeText(document.body.innerText).toLowerCase();
-  if (!pageText) {
-    return false;
-  }
-
-  return /(^|\s)accepted($|\s)/.test(pageText);
+  return getSubmissionStatusFromPage() === 'accepted';
 }
 
 function hasFailedSubmissionOnPage() {
-  if (!document.body) {
-    return false;
-  }
-
-  var pageText = normalizeText(document.body.innerText).toLowerCase();
-  if (!pageText) {
-    return false;
-  }
-
-  var failures = [
-    'wrong answer',
-    'time limit exceeded',
-    'runtime error',
-    'compile error',
-    'memory limit exceeded',
-    'output limit exceeded',
-  ];
-
-  for (var i = 0; i < failures.length; i += 1) {
-    if (pageText.indexOf(failures[i]) !== -1) {
-      return true;
-    }
-  }
-
-  return false;
+  return getSubmissionStatusFromPage() === 'failed';
 }
 
 var autoSaveState = {
   working: false,
   lastKey: '',
   armed: false,
+  armedAt: 0,
 };
 
 function runtimeSend(message) {
@@ -208,6 +222,11 @@ function runtimeSend(message) {
 
 async function tryAutoSave() {
   if (autoSaveState.working || !autoSaveState.armed || !isLikelyProblemPage()) {
+    return;
+  }
+
+  if (!autoSaveState.armedAt || Date.now() - autoSaveState.armedAt > 3 * 60 * 1000) {
+    autoSaveState.armed = false;
     return;
   }
 
@@ -238,12 +257,23 @@ async function tryAutoSave() {
 
     autoSaveState.lastKey = dedupeKey;
     payload.data.autoTriggered = true;
+    payload.data.submissionAccepted = true;
     var response = await runtimeSend({ type: 'saveProblemToGithub', payload: payload.data });
     if (!response || !response.ok) {
       console.warn(
         'Auto-save failed:',
         response && response.error ? response.error : 'Unknown save error'
       );
+
+      if (
+        response &&
+        response.error &&
+        /manual save is disabled|not accepted|no solution code detected|unsupported language/i.test(
+          response.error
+        )
+      ) {
+        autoSaveState.armed = false;
+      }
       return;
     }
 
@@ -287,6 +317,7 @@ function startAcceptedWatcher() {
 
       if (isSubmitTrigger(event.target)) {
         autoSaveState.armed = true;
+        autoSaveState.armedAt = Date.now();
       }
     },
     true

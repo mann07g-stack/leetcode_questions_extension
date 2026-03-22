@@ -195,15 +195,20 @@ function languageToExtension(language) {
   var map = {
     c: '.c',
     cpp: '.cpp',
-    'c++': '.cpp',
+    cpp14: '.cpp',
+    cpp17: '.cpp',
+    cpp20: '.cpp',
     java: '.java',
     python: '.py',
-    python3: '.py',
     python2: '.py',
+    python3: '.py',
+    py: '.py',
     javascript: '.js',
-    'javascript (es6)': '.js',
-    'javascript (es5)': '.js',
+    js: '.js',
+    javascriptes5: '.js',
+    javascriptes6: '.js',
     typescript: '.ts',
+    ts: '.ts',
     go: '.go',
     golang: '.go',
     kotlin: '.kt',
@@ -212,18 +217,20 @@ function languageToExtension(language) {
     swift: '.swift',
     php: '.php',
     scala: '.scala',
-    'c#': '.cs',
     csharp: '.cs',
+    cs: '.cs',
     mysql: '.sql',
     sql: '.sql',
     mssql: '.sql',
     oracle: '.sql',
     plpgsql: '.sql',
     postgres: '.sql',
+    postgresql: '.sql',
     r: '.r',
     dart: '.dart',
     bash: '.sh',
     shell: '.sh',
+    sh: '.sh',
     elixir: '.ex',
     erlang: '.erl',
     clojure: '.clj',
@@ -234,41 +241,22 @@ function languageToExtension(language) {
     perl: '.pl',
     haskell: '.hs',
     ocaml: '.ml',
-    'f#': '.fs',
     fsharp: '.fs',
     groovy: '.groovy',
     solidity: '.sol',
     vb: '.vb',
-    'visual basic': '.vb',
+    visualbasic: '.vb',
   };
 
-  var normalized = String(language || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[()]/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
+  var normalized = normalizeLanguage(language)
+    .replace(/c\+\+/g, 'cpp')
+    .replace(/c#/g, 'csharp')
+    .replace(/f#/g, 'fsharp')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
 
-  if (map[normalized]) {
-    return map[normalized];
-  }
-
-  var key = normalized.replace(/\s+/g, '');
-  for (var mapKey in map) {
-    if (mapKey === key || mapKey === normalized) {
-      return map[mapKey];
-    }
-  }
-
-  var lowerLang = normalized.split(' ')[0];
-  for (var mapKeyAlt in map) {
-    if (mapKeyAlt.indexOf(lowerLang) !== -1 || lowerLang.indexOf(mapKeyAlt) !== -1) {
-      return map[mapKeyAlt];
-    }
-  }
-
-  return '.txt';
+  return map[normalized] || null;
 }
 
 function buildMarkdown(problem) {
@@ -481,8 +469,26 @@ async function saveProblemToGithub(problem, tabId) {
   }
 
   var finalProblem = Object.assign({}, problem);
+
+  if (!finalProblem.autoTriggered) {
+    throw new Error('Manual save is disabled. Submit on LeetCode and auto-save will run.');
+  }
+
+  if (!finalProblem.submissionAccepted) {
+    throw new Error('Latest submission is not accepted. Only accepted submissions are saved.');
+  }
+
   if ((!finalProblem.code || !finalProblem.code.trim()) && tabId) {
     finalProblem.code = await extractCodeFromTab(tabId);
+  }
+
+  if (!finalProblem.code || !finalProblem.code.trim()) {
+    throw new Error('No solution code detected. Submission was not saved.');
+  }
+
+  var fileExtension = languageToExtension(finalProblem.language);
+  if (!fileExtension) {
+    throw new Error('Unsupported language for auto-save: ' + String(finalProblem.language || ''));
   }
 
   if (finalProblem && finalProblem.autoTriggered) {
@@ -520,19 +526,16 @@ async function saveProblemToGithub(problem, tabId) {
     message: 'docs: save ' + finalProblem.title,
   });
 
-  var codePath = null;
-  if (finalProblem.code && finalProblem.code.trim()) {
-    codePath = base + '/solution' + languageToExtension(finalProblem.language);
+  var codePath = base + '/solution' + fileExtension;
 
-    await upsertGithubFile({
-      token: token,
-      repo: repo,
-      branch: branch,
-      path: codePath,
-      content: finalProblem.code,
-      message: 'code: save ' + finalProblem.title + ' solution',
-    });
-  }
+  await upsertGithubFile({
+    token: token,
+    repo: repo,
+    branch: branch,
+    path: codePath,
+    content: finalProblem.code,
+    message: 'code: save ' + finalProblem.title + ' solution',
+  });
 
   var stats = await getStats();
   if (readmeWrite && readmeWrite.created) {
