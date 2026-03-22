@@ -302,17 +302,38 @@ var AUTO_SAVE_DEBUG = true;
 function runtimeSend(message) {
   return new Promise(function (resolve) {
     try {
-      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+      var runtime =
+        typeof chrome !== 'undefined' && chrome && chrome.runtime ? chrome.runtime : null;
+
+      if (!runtime || !runtime.id || typeof runtime.sendMessage !== 'function') {
         resolve({ ok: false, error: 'Extension runtime unavailable.' });
         return;
       }
 
-      chrome.runtime.sendMessage(message, function (response) {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message });
-          return;
+      runtime.sendMessage(message, function (response) {
+        try {
+          // Runtime can disappear between send and callback when extension reloads.
+          if (!runtime || !runtime.id) {
+            resolve({ ok: false, error: 'Extension runtime unavailable during callback.' });
+            return;
+          }
+
+          var lastError = runtime.lastError;
+          if (lastError) {
+            resolve({ ok: false, error: lastError.message });
+            return;
+          }
+
+          resolve(response || {});
+        } catch (callbackError) {
+          resolve({
+            ok: false,
+            error:
+              callbackError && callbackError.message
+                ? callbackError.message
+                : 'Failed to process runtime callback.',
+          });
         }
-        resolve(response || {});
       });
     } catch (error) {
       resolve({
