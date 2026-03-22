@@ -443,6 +443,49 @@ function setSyncAcceptedLoading(isLoading, labelText) {
   label.textContent = labelText || 'Sync All Accepted';
 }
 
+var BULK_BATCH_SIZE = 100;
+var BULK_CURSOR_KEY = 'bulkSyncCursor';
+var BULK_TOTAL_KEY = 'bulkSyncTotal';
+
+function buildSyncButtonLabel(cursor, total) {
+  var current = Math.max(0, Number(cursor) || 0);
+  var max = Math.max(0, Number(total) || 0);
+  if (current > 0 && max > 0 && current < max) {
+    return 'Send Next 100 (' + String(current) + '/' + String(max) + ')';
+  }
+  if (current > 0) {
+    return 'Send Next 100';
+  }
+  return 'Sync All Accepted';
+}
+
+async function readBulkSyncProgress() {
+  var state = await getStorage([BULK_CURSOR_KEY, BULK_TOTAL_KEY]);
+  return {
+    cursor: Math.max(0, Number(state[BULK_CURSOR_KEY]) || 0),
+    total: Math.max(0, Number(state[BULK_TOTAL_KEY]) || 0),
+  };
+}
+
+async function writeBulkSyncProgress(cursor, total) {
+  var updates = {};
+  updates[BULK_CURSOR_KEY] = Math.max(0, Number(cursor) || 0);
+  updates[BULK_TOTAL_KEY] = Math.max(0, Number(total) || 0);
+  await setStorage(updates);
+}
+
+async function clearBulkSyncProgress() {
+  var updates = {};
+  updates[BULK_CURSOR_KEY] = 0;
+  updates[BULK_TOTAL_KEY] = 0;
+  await setStorage(updates);
+}
+
+async function refreshSyncButtonLabel() {
+  var progress = await readBulkSyncProgress();
+  setSyncAcceptedLoading(false, buildSyncButtonLabel(progress.cursor, progress.total));
+}
+
 function isLeetCodeTab(tab) {
   if (!tab || !tab.url) {
     return false;
@@ -450,16 +493,27 @@ function isLeetCodeTab(tab) {
   return /https:\/\/(www\.)?leetcode\.com\//.test(String(tab.url));
 }
 
-async function requestBulkAcceptedSync(tabId) {
+async function requestBulkAcceptedSync(tabId, startCursor) {
   return sendTabMessage(tabId, {
     type: 'bulkSyncAcceptedProfile',
-    payload: { maxToScan: 2000 },
+    payload: {
+      maxToScan: 10000,
+      startCursor: Math.max(0, Number(startCursor) || 0),
+      batchSize: BULK_BATCH_SIZE,
+    },
   });
 }
 
 async function handleSyncAcceptedProfile() {
-  setSyncAcceptedLoading(true, 'Syncing…');
-  setStatus('Syncing accepted submissions from your LeetCode profile…', false);
+  var progress = await readBulkSyncProgress();
+  var startCursor = progress.cursor;
+  setSyncAcceptedLoading(true, startCursor > 0 ? 'Sending Next 100…' : 'Syncing…');
+  setStatus(
+    startCursor > 0
+      ? 'Syncing next 100 accepted submissions from your LeetCode profile…'
+      : 'Syncing accepted submissions from your LeetCode profile…',
+    false
+  );
 
   try {
     var tab = await queryActiveTab();
@@ -470,12 +524,12 @@ async function handleSyncAcceptedProfile() {
 
     var response;
     try {
-      response = await requestBulkAcceptedSync(tab.id);
+      response = await requestBulkAcceptedSync(tab.id, startCursor);
     } catch (messageError) {
       var messageText = messageError && messageError.message ? messageError.message : '';
       if (/receiving end does not exist/i.test(messageText)) {
         await injectContentScript(tab.id);
-        response = await requestBulkAcceptedSync(tab.id);
+        response = await requestBulkAcceptedSync(tab.id, startCursor);
       } else {
         throw messageError;
       }
@@ -487,23 +541,55 @@ async function handleSyncAcceptedProfile() {
     }
 
     var result = response.result || {};
+    var totalAccepted = Number(result.totalAccepted) || 0;
+    var batchStart = Number(result.batchStart) || startCursor;
+    var batchEnd = Number(result.batchEnd) || batchStart;
+    var hasMore = Boolean(result.hasMore);
+    var nextCursor = Number(result.nextCursor) || 0;
+
+    if (hasMore) {
+      await writeBulkSyncProgress(nextCursor, totalAccepted);
+    } else {
+      await clearBulkSyncProgress();
+    }
+
+    var summaryPrefix = hasMore ? 'Batch sync complete.' : 'Sync complete.';
     var summary =
-      'Sync complete. Saved: ' +
+      summaryPrefix +
+      ' Saved: ' +
       String(result.saved || 0) +
       ', Skipped: ' +
       String(result.skipped || 0) +
       ', Failed: ' +
       String(result.failed || 0) +
-      ', Total accepted scanned: ' +
-      String(result.totalAccepted || 0) +
+      ', Batch range: ' +
+      String(batchStart) +
+      '-' +
+      String(batchEnd) +
+      ', Total accepted: ' +
+      String(totalAccepted) +
       '.';
     setStatus(summary, false);
     await refreshStats();
     await refreshAutoSaveDebug();
+
+    if (hasMore) {
+      setSyncAcceptedLoading(false, buildSyncButtonLabel(nextCursor, totalAccepted));
+      return;
+    }
+
+    setSyncAcceptedLoading(false, 'Sync All Accepted');
   } catch (error) {
     setStatus(error && error.message ? error.message : 'Bulk sync failed.', true);
+    await refreshSyncButtonLabel();
   } finally {
-    setSyncAcceptedLoading(false, 'Sync All Accepted');
+    var button = byId('syncAcceptedProfile');
+    var spinner = byId('syncAcceptedSpinner');
+    if (button && spinner) {
+      button.disabled = false;
+      button.classList.remove('loading');
+      spinner.classList.add('hidden');
+    }
   }
 }
 
@@ -535,6 +621,7 @@ async function init() {
   await refreshStats();
   await refreshAuthAndRepos();
   await refreshAutoSaveDebug();
+  await refreshSyncButtonLabel();
 }
 
 document.addEventListener('DOMContentLoaded', init);

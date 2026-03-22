@@ -307,6 +307,63 @@ function applyCommitTemplate(template, context, fallback) {
   });
 }
 
+function planProblemFiles(problem, options) {
+  var folder = String(options.folder || 'problems');
+  var useDifficultyFolder = Boolean(options.useDifficultyFolder);
+  var useLanguageFolder = Boolean(options.useLanguageFolder);
+  var useTimestampFilename = Boolean(options.useTimestampFilename);
+  var customCommitTemplate = String(options.customCommitTemplate || '');
+  var fileExtension = String(options.fileExtension || '');
+
+  var slug = normalizePathSegment(problem.slug || problem.title || 'problem');
+  var baseParts = [];
+  var folderRoot = folder.replace(/^\/+|\/+$/g, '');
+  if (folderRoot) {
+    baseParts.push(folderRoot);
+  }
+  if (useLanguageFolder) {
+    baseParts.push(normalizePathSegment(titleCaseWords(problem.language || 'unknown')));
+  }
+  if (useDifficultyFolder) {
+    baseParts.push(normalizePathSegment(titleCaseWords(problem.difficulty || 'unknown')));
+  }
+  baseParts.push(slug);
+  var base = baseParts.join('/');
+
+  var commitContext = {
+    problemName: slug,
+    difficulty: problem.difficulty || 'Unknown',
+    language: problem.language || 'Unknown',
+    date: getTodaysDate(),
+    time: getCurrentTime(),
+    url: problem.url || '',
+  };
+
+  var readmeCommitMessage = 'docs: save ' + problem.title;
+  var codeCommitMessage = applyCommitTemplate(
+    customCommitTemplate,
+    commitContext,
+    'code: save ' + problem.title + ' solution'
+  );
+
+  var readmePath = base + '/README.md';
+  var codeFileName = 'solution';
+  if (useTimestampFilename) {
+    codeFileName = 'solution-' + getTodaysDate() + '-' + getCurrentTime();
+  }
+  var codePath = base + '/' + codeFileName + fileExtension;
+
+  return {
+    slug: slug,
+    readmePath: readmePath,
+    codePath: codePath,
+    readmeContent: buildMarkdown(problem),
+    codeContent: problem.code,
+    readmeCommitMessage: readmeCommitMessage,
+    codeCommitMessage: codeCommitMessage,
+  };
+}
+
 function languageToExtension(language) {
   var map = {
     c: '.c',
@@ -687,62 +744,31 @@ async function saveProblemToGithub(problem, tabId) {
     await setStorage({ lastAutoSaveKey: autoKey });
   }
 
-  var slug = normalizePathSegment(finalProblem.slug || finalProblem.title || 'problem');
-  var baseParts = [];
-  var folderRoot = folder.replace(/^\/+|\/+$/g, '');
-  if (folderRoot) {
-    baseParts.push(folderRoot);
-  }
-  if (useLanguageFolder) {
-    baseParts.push(normalizePathSegment(titleCaseWords(finalProblem.language || 'unknown')));
-  }
-  if (useDifficultyFolder) {
-    baseParts.push(normalizePathSegment(titleCaseWords(finalProblem.difficulty || 'unknown')));
-  }
-  baseParts.push(slug);
-  var base = baseParts.join('/');
-
-  var commitContext = {
-    problemName: slug,
-    difficulty: finalProblem.difficulty || 'Unknown',
-    language: finalProblem.language || 'Unknown',
-    date: getTodaysDate(),
-    time: getCurrentTime(),
-    url: finalProblem.url || '',
-  };
-
-  var readmeCommitMessage = 'docs: save ' + finalProblem.title;
-  var codeCommitMessage = applyCommitTemplate(
-    customCommitTemplate,
-    commitContext,
-    'code: save ' + finalProblem.title + ' solution'
-  );
-
-  var readmePath = base + '/README.md';
-  var markdownContent = buildMarkdown(finalProblem);
+  var filePlan = planProblemFiles(finalProblem, {
+    folder: folder,
+    useDifficultyFolder: useDifficultyFolder,
+    useLanguageFolder: useLanguageFolder,
+    useTimestampFilename: useTimestampFilename,
+    customCommitTemplate: customCommitTemplate,
+    fileExtension: fileExtension,
+  });
 
   var readmeWrite = await upsertGithubFile({
     token: token,
     repo: repo,
     branch: branch,
-    path: readmePath,
-    content: markdownContent,
-    message: readmeCommitMessage,
+    path: filePlan.readmePath,
+    content: filePlan.readmeContent,
+    message: filePlan.readmeCommitMessage,
   });
-
-  var codeFileName = 'solution';
-  if (useTimestampFilename) {
-    codeFileName = 'solution-' + getTodaysDate() + '-' + getCurrentTime();
-  }
-  var codePath = base + '/' + codeFileName + fileExtension;
 
   await upsertGithubFile({
     token: token,
     repo: repo,
     branch: branch,
-    path: codePath,
+    path: filePlan.codePath,
     content: finalProblem.code,
-    message: codeCommitMessage,
+    message: filePlan.codeCommitMessage,
   });
 
   var stats = await getStats();
@@ -751,9 +777,341 @@ async function saveProblemToGithub(problem, tabId) {
   }
 
   return {
-    readmePath: readmePath,
-    codePath: codePath,
+    readmePath: filePlan.readmePath,
+    codePath: filePlan.codePath,
     stats: stats,
+  };
+}
+
+async function getBranchHeadCommitSha(token, repo, branch) {
+  var ref = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/ref/heads/' + encodeURIComponent(branch),
+    'GET'
+  );
+  if (!ref || !ref.object || !ref.object.sha) {
+    throw new Error('Could not resolve branch head for ' + branch + '.');
+  }
+  return ref.object.sha;
+}
+
+async function getCommitTreeSha(token, repo, commitSha) {
+  var commit = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/commits/' + encodeURIComponent(commitSha),
+    'GET'
+  );
+  if (!commit || !commit.tree || !commit.tree.sha) {
+    throw new Error('Could not resolve commit tree.');
+  }
+  return commit.tree.sha;
+}
+
+async function getTreePaths(token, repo, treeSha) {
+  var treeData = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' +
+      repo +
+      '/git/trees/' +
+      encodeURIComponent(treeSha) +
+      '?recursive=1',
+    'GET'
+  );
+  var tree = Array.isArray(treeData && treeData.tree) ? treeData.tree : [];
+  var paths = {};
+  for (var i = 0; i < tree.length; i += 1) {
+    var item = tree[i] || {};
+    if (item.path) {
+      paths[item.path] = true;
+    }
+  }
+  return paths;
+}
+
+async function createGitBlob(token, repo, content) {
+  var blob = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/blobs',
+    'POST',
+    {
+      content: String(content || ''),
+      encoding: 'utf-8',
+    }
+  );
+  if (!blob || !blob.sha) {
+    throw new Error('Failed to create Git blob.');
+  }
+  return blob.sha;
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  var queue = Array.isArray(items) ? items.slice() : [];
+  var maxWorkers = Math.max(1, Number(limit) || 1);
+  var results = [];
+  var workers = [];
+
+  function worker() {
+    return new Promise(function (resolve) {
+      (function next() {
+        if (!queue.length) {
+          resolve();
+          return;
+        }
+        var item = queue.shift();
+        Promise.resolve()
+          .then(function () {
+            return mapper(item);
+          })
+          .then(function (result) {
+            results.push(result);
+            next();
+          })
+          .catch(function (error) {
+            results.push({ error: error });
+            next();
+          });
+      })();
+    });
+  }
+
+  for (var i = 0; i < maxWorkers; i += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return results;
+}
+
+async function bulkSaveProblemsToGithub(problems) {
+  var config = await getStorage([
+    'githubToken',
+    'githubRepo',
+    'githubBranch',
+    'githubFolder',
+    'useDifficultyFolder',
+    'useLanguageFolder',
+    'useTimestampFilename',
+    'custom_commit_message',
+  ]);
+
+  var token = config.githubToken;
+  var repo = config.githubRepo;
+  var branch = config.githubBranch || 'main';
+  var folder = config.githubFolder || 'problems';
+  var useDifficultyFolder = Boolean(config.useDifficultyFolder);
+  var useLanguageFolder = Boolean(config.useLanguageFolder);
+  var useTimestampFilename = Boolean(config.useTimestampFilename);
+  var customCommitTemplate = config.custom_commit_message || '';
+
+  if (!token || !repo) {
+    throw new Error('Missing GitHub token or repository. Save settings in popup.');
+  }
+
+  if (!Array.isArray(problems) || !problems.length) {
+    return {
+      committed: false,
+      total: 0,
+      saved: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+      stats: await getStats(),
+    };
+  }
+
+  var parentCommitSha = await getBranchHeadCommitSha(token, repo, branch);
+  var baseTreeSha = await getCommitTreeSha(token, repo, parentCommitSha);
+  var existingPaths = await getTreePaths(token, repo, baseTreeSha);
+
+  var seenProblemKeys = {};
+  var plannedByPath = {};
+  var newReadmeDifficulties = [];
+  var failures = [];
+  var skipped = 0;
+  var failed = 0;
+
+  for (var i = 0; i < problems.length; i += 1) {
+    var problem = Object.assign({}, problems[i] || {});
+    try {
+      if (!problem.autoTriggered) {
+        skipped += 1;
+        continue;
+      }
+      if (!problem.submissionAccepted) {
+        skipped += 1;
+        continue;
+      }
+      if (!problem.code || !String(problem.code).trim()) {
+        skipped += 1;
+        continue;
+      }
+
+      var key = [
+        normalizePathSegment(problem.slug || ''),
+        normalizeLanguage(problem.language || ''),
+        fastHash(problem.code || ''),
+      ].join('|');
+      if (seenProblemKeys[key]) {
+        skipped += 1;
+        continue;
+      }
+      seenProblemKeys[key] = true;
+
+      var fileExtension = languageToExtension(problem.language);
+      if (!fileExtension) {
+        fileExtension = inferExtensionFromCode(problem.code);
+      }
+      if (!fileExtension) {
+        skipped += 1;
+        continue;
+      }
+
+      var plan = planProblemFiles(problem, {
+        folder: folder,
+        useDifficultyFolder: useDifficultyFolder,
+        useLanguageFolder: useLanguageFolder,
+        useTimestampFilename: useTimestampFilename,
+        customCommitTemplate: customCommitTemplate,
+        fileExtension: fileExtension,
+      });
+
+      plannedByPath[plan.readmePath] = {
+        path: plan.readmePath,
+        content: plan.readmeContent,
+      };
+      plannedByPath[plan.codePath] = {
+        path: plan.codePath,
+        content: plan.codeContent,
+      };
+
+      if (!existingPaths[plan.readmePath]) {
+        newReadmeDifficulties.push(String(problem.difficulty || 'Unknown').toLowerCase());
+      }
+    } catch (error) {
+      failed += 1;
+      failures.push({
+        slug: problem.slug || 'unknown-problem',
+        error: error && error.message ? error.message : String(error),
+      });
+    }
+  }
+
+  var plannedEntries = Object.keys(plannedByPath).map(function (path) {
+    return plannedByPath[path];
+  });
+
+  if (!plannedEntries.length) {
+    return {
+      committed: false,
+      total: problems.length,
+      saved: 0,
+      skipped: skipped,
+      failed: failed,
+      failures: failures,
+      stats: await getStats(),
+    };
+  }
+
+  var blobRecords = await mapWithConcurrency(plannedEntries, 8, async function (entry) {
+    var sha = await createGitBlob(token, repo, entry.content);
+    return {
+      path: entry.path,
+      sha: sha,
+    };
+  });
+
+  var tree = [];
+  for (var j = 0; j < blobRecords.length; j += 1) {
+    var record = blobRecords[j];
+    if (!record || !record.sha || !record.path) {
+      failed += 1;
+      continue;
+    }
+    tree.push({
+      path: record.path,
+      mode: '100644',
+      type: 'blob',
+      sha: record.sha,
+    });
+  }
+
+  if (!tree.length) {
+    return {
+      committed: false,
+      total: problems.length,
+      saved: 0,
+      skipped: skipped,
+      failed: failed,
+      failures: failures,
+      stats: await getStats(),
+    };
+  }
+
+  var newTree = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/trees',
+    'POST',
+    {
+      base_tree: baseTreeSha,
+      tree: tree,
+    }
+  );
+
+  var commitMessage =
+    'bulk: sync ' + String(Math.floor(tree.length / 2)) + ' accepted LeetCode solutions';
+  var newCommit = await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/commits',
+    'POST',
+    {
+      message: commitMessage,
+      tree: newTree.sha,
+      parents: [parentCommitSha],
+    }
+  );
+
+  await githubApiWithToken(
+    token,
+    'https://api.github.com/repos/' + repo + '/git/refs/heads/' + encodeURIComponent(branch),
+    'PATCH',
+    {
+      sha: newCommit.sha,
+      force: false,
+    }
+  );
+
+  if (newReadmeDifficulties.length) {
+    var stats = await getStats();
+    for (var k = 0; k < newReadmeDifficulties.length; k += 1) {
+      var diff = newReadmeDifficulties[k];
+      stats.total += 1;
+      if (diff === 'easy') {
+        stats.easy += 1;
+      } else if (diff === 'medium') {
+        stats.medium += 1;
+      } else if (diff === 'hard') {
+        stats.hard += 1;
+      }
+    }
+    await setStorage({ stats: stats });
+  }
+
+  await setStorage({
+    lastAutoSaveStatus: {
+      ok: true,
+      at: new Date().toISOString(),
+      message: 'Bulk sync committed successfully.',
+    },
+  });
+
+  return {
+    committed: true,
+    commitSha: newCommit.sha,
+    total: problems.length,
+    saved: Math.floor(tree.length / 2),
+    skipped: skipped,
+    failed: failed,
+    failures: failures,
+    stats: await getStats(),
   };
 }
 
@@ -1017,6 +1375,38 @@ function setupBackgroundMessageListener() {
               }
             });
 
+          return true;
+        }
+
+        if (request.type === 'bulkSaveProblemsToGithub') {
+          bulkSaveProblemsToGithub(request.payload && request.payload.problems)
+            .then(function (result) {
+              appendAutoSaveDebug({
+                source: 'background',
+                stage: 'bulk-save-success',
+                details: {
+                  saved: result.saved || 0,
+                  skipped: result.skipped || 0,
+                  failed: result.failed || 0,
+                  commitSha: result.commitSha || null,
+                },
+                at: new Date().toISOString(),
+                url: '',
+              });
+              sendResponse({ ok: true, result: result });
+            })
+            .catch(function (error) {
+              appendAutoSaveDebug({
+                source: 'background',
+                stage: 'bulk-save-failed',
+                details: {
+                  error: error && error.message ? error.message : 'Bulk save failed.',
+                },
+                at: new Date().toISOString(),
+                url: '',
+              });
+              sendResponse({ ok: false, error: error.message || 'Bulk save failed.' });
+            });
           return true;
         }
       } catch (handlerError) {

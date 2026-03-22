@@ -446,6 +446,603 @@ async function getProblemData() {
   };
 }
 
+function getCookieValue(name) {
+  var escapedName = String(name || '').replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+  var match = document.cookie.match(new RegExp('(?:^|; )' + escapedName + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function htmlToText(html) {
+  var source = String(html || '');
+  if (!source) {
+    return '';
+  }
+  try {
+    var doc = new DOMParser().parseFromString(source, 'text/html');
+    return normalizeText((doc.body && doc.body.innerText) || doc.documentElement.textContent || '');
+  } catch {
+    return normalizeText(source);
+  }
+}
+
+function sleep(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchJsonWithSession(url, method, body) {
+  var csrf = getCookieValue('csrftoken');
+  var headers = {
+    accept: 'application/json',
+  };
+
+  if (csrf) {
+    headers['x-csrftoken'] = csrf;
+    headers['x-requested-with'] = 'XMLHttpRequest';
+  }
+
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
+
+  var response = await fetch(url, {
+    method: method || 'GET',
+    credentials: 'include',
+    headers: headers,
+    referrer: window.location.origin + '/submissions/',
+    referrerPolicy: 'strict-origin-when-cross-origin',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    var error = new Error('HTTP ' + response.status);
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json();
+}
+
+async function fetchProblemSubmissionsBySlug(slug) {
+  var safeSlug = String(slug || '').trim();
+  if (!safeSlug) {
+    return [];
+  }
+
+  var paths = [
+    '/api/submissions/' + safeSlug + '/?offset=0&limit=20',
+    '/api/submissions/' + safeSlug + '?offset=0&limit=20',
+  ];
+  for (var i = 0; i < paths.length; i += 1) {
+    try {
+      var json = await fetchJsonWithSession(paths[i], 'GET');
+      var dump = Array.isArray(json && json.submissions_dump) ? json.submissions_dump : [];
+      if (dump.length) {
+        return dump;
+      }
+    } catch {
+      // Try next path variant.
+    }
+  }
+
+  return [];
+}
+
+async function fetchSubmissionListPageGraphql(offset, limit, lastKey) {
+  var body = {
+    operationName: 'submissionList',
+    query:
+      'query submissionList($offset: Int!, $limit: Int!, $lastKey: String) {' +
+      ' submissionList(offset: $offset, limit: $limit, lastKey: $lastKey) {' +
+      '   hasNext lastKey submissions {' +
+      '     id title titleSlug statusDisplay lang timestamp' +
+      '   }' +
+      ' }' +
+      '}',
+    variables: {
+      offset: Number(offset) || 0,
+      limit: Number(limit) || 20,
+      lastKey: lastKey || null,
+    },
+  };
+
+  return fetchJsonWithSession('/graphql/', 'POST', body);
+}
+
+async function fetchAcceptedSubmissionIndexGraphql(upperBound) {
+  var acceptedBySlug = {};
+  var offset = 0;
+  var limit = 20;
+  var lastKey = null;
+  var hasNext = true;
+  var safety = 0;
+
+  while (hasNext && offset < upperBound && safety < 600) {
+    safety += 1;
+
+    var json = await fetchSubmissionListPageGraphql(offset, limit, lastKey);
+    var root = json && json.data ? json.data.submissionList : null;
+    var submissions = Array.isArray(root && root.submissions) ? root.submissions : [];
+    if (!submissions.length) {
+      break;
+    }
+
+    for (var i = 0; i < submissions.length; i += 1) {
+      var item = submissions[i] || {};
+      var statusText = String(item.statusDisplay || item.status_display || '').toLowerCase();
+      if (statusText !== 'accepted' && statusText !== 'ac') {
+        continue;
+      }
+
+      var slug = String(item.titleSlug || item.title_slug || '').trim();
+      if (!slug) {
+        continue;
+      }
+
+      var previous = acceptedBySlug[slug];
+      var currentTimestamp = Number(item.timestamp || 0);
+      if (!previous || currentTimestamp > Number(previous.timestamp || 0)) {
+        acceptedBySlug[slug] = {
+          id: item.id,
+          slug: slug,
+          title: item.title || slug,
+          timestamp: currentTimestamp,
+          language: item.lang || '',
+        };
+      }
+    }
+
+    offset += submissions.length;
+    hasNext = Boolean(root && root.hasNext);
+    lastKey = root && root.lastKey ? root.lastKey : null;
+    if (!hasNext && submissions.length < limit) {
+      break;
+    }
+
+    await sleep(50);
+  }
+
+  return Object.keys(acceptedBySlug).map(function (slug) {
+    return acceptedBySlug[slug];
+  });
+}
+
+async function fetchAcceptedSubmissionIndexFallback(upperBound) {
+  var acceptedBySlug = {};
+  var json = await fetchJsonWithSession('/api/problems/all/', 'GET');
+  var pairs = Array.isArray(json && json.stat_status_pairs) ? json.stat_status_pairs : [];
+  var solved = [];
+
+  for (var i = 0; i < pairs.length; i += 1) {
+    var pair = pairs[i] || {};
+    if (String(pair.status || '').toLowerCase() !== 'ac') {
+      continue;
+    }
+
+    var stat = pair.stat || {};
+    var slug = String(stat.question__title_slug || '').trim();
+    if (!slug) {
+      continue;
+    }
+
+    solved.push({
+      slug: slug,
+      title: stat.question__title || slug,
+    });
+
+    if (solved.length >= upperBound) {
+      break;
+    }
+  }
+
+  for (var j = 0; j < solved.length; j += 1) {
+    var solvedEntry = solved[j];
+    var submissions = await fetchProblemSubmissionsBySlug(solvedEntry.slug);
+    for (var k = 0; k < submissions.length; k += 1) {
+      var item = submissions[k] || {};
+      if (String(item.status_display || '').toLowerCase() !== 'accepted') {
+        continue;
+      }
+
+      var previous = acceptedBySlug[solvedEntry.slug];
+      var ts = Number(item.timestamp || 0);
+      if (!previous || ts > Number(previous.timestamp || 0)) {
+        acceptedBySlug[solvedEntry.slug] = {
+          id: item.id,
+          slug: solvedEntry.slug,
+          title: item.title || solvedEntry.title,
+          timestamp: ts,
+          language: item.lang || '',
+        };
+      }
+    }
+
+    await sleep(60);
+  }
+
+  return Object.keys(acceptedBySlug).map(function (slug) {
+    return acceptedBySlug[slug];
+  });
+}
+
+async function fetchAcceptedSubmissionIndex(maxToScan) {
+  var limit = 20;
+  var offset = 0;
+  var upperBound = Number(maxToScan) > 0 ? Number(maxToScan) : 2000;
+  var acceptedBySlug = {};
+
+  try {
+    while (offset < upperBound) {
+      var url = '/api/submissions/?offset=' + offset + '&limit=' + limit;
+      var json = await fetchJsonWithSession(url, 'GET');
+      var dump = Array.isArray(json && json.submissions_dump) ? json.submissions_dump : [];
+      if (!dump.length) {
+        break;
+      }
+
+      for (var i = 0; i < dump.length; i += 1) {
+        var item = dump[i] || {};
+        if (String(item.status_display || '').toLowerCase() !== 'accepted') {
+          continue;
+        }
+        var slug = String(item.title_slug || '').trim();
+        if (!slug) {
+          continue;
+        }
+
+        var previous = acceptedBySlug[slug];
+        var currentTimestamp = Number(item.timestamp || 0);
+        if (!previous || currentTimestamp > Number(previous.timestamp || 0)) {
+          acceptedBySlug[slug] = {
+            id: item.id,
+            slug: slug,
+            title: item.title || slug,
+            timestamp: currentTimestamp,
+            language: item.lang || '',
+          };
+        }
+      }
+
+      offset += dump.length;
+      if (dump.length < limit || json.has_next === false) {
+        break;
+      }
+    }
+  } catch (error) {
+    if (Number(error && error.status) === 403) {
+      debugAutoSave('bulk-sync-index-403-fallback', {
+        message: 'Primary submissions index blocked, trying GraphQL submissions fallback.',
+      });
+
+      try {
+        return await fetchAcceptedSubmissionIndexGraphql(upperBound);
+      } catch (graphError) {
+        debugAutoSave('bulk-sync-graphql-fallback-failed', {
+          error: graphError && graphError.message ? graphError.message : String(graphError),
+          message: 'GraphQL fallback failed, using solved-problems fallback.',
+        });
+        return fetchAcceptedSubmissionIndexFallback(upperBound);
+      }
+    }
+    throw new Error(
+      'Failed to fetch submissions index: ' +
+        (error && error.message ? error.message : 'Unknown error')
+    );
+  }
+
+  return Object.keys(acceptedBySlug).map(function (slug) {
+    return acceptedBySlug[slug];
+  });
+}
+
+async function fetchSubmissionDetails(submissionId) {
+  var csrf = getCookieValue('csrftoken');
+  var query = {
+    operationName: 'submissionDetails',
+    query:
+      'query submissionDetails($submissionId: Int!) {' +
+      ' submissionDetails(submissionId: $submissionId) {' +
+      '   code runtimeDisplay memoryDisplay timestamp' +
+      '   lang { name verboseName }' +
+      '   question { title titleSlug content difficulty }' +
+      ' }' +
+      '}',
+    variables: { submissionId: Number(submissionId) },
+  };
+
+  var headers = { 'content-type': 'application/json' };
+  if (csrf) {
+    headers['x-csrftoken'] = csrf;
+    headers['x-requested-with'] = 'XMLHttpRequest';
+  }
+
+  var response = await fetch('/graphql/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: headers,
+    body: JSON.stringify(query),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch submission details: HTTP ' + response.status);
+  }
+
+  var json = await response.json();
+  var details = json && json.data ? json.data.submissionDetails : null;
+  if (!details || !details.code) {
+    throw new Error('Submission details missing solution code.');
+  }
+
+  return details;
+}
+
+async function resolveSubmissionId(indexEntry) {
+  var directId = Number(indexEntry && indexEntry.id);
+  if (Number.isFinite(directId) && directId > 0) {
+    return directId;
+  }
+
+  var slug = String((indexEntry && indexEntry.slug) || '').trim();
+  if (!slug) {
+    throw new Error('Missing submission id and slug.');
+  }
+
+  var submissions = await fetchProblemSubmissionsBySlug(slug);
+  for (var i = 0; i < submissions.length; i += 1) {
+    var item = submissions[i] || {};
+    if (String(item.status_display || '').toLowerCase() !== 'accepted') {
+      continue;
+    }
+
+    var fallbackId = Number(item.id || item.submission_id || 0);
+    if (Number.isFinite(fallbackId) && fallbackId > 0) {
+      return fallbackId;
+    }
+  }
+
+  throw new Error('Could not resolve accepted submission id for slug: ' + slug);
+}
+
+async function fetchSubmissionDetailsWithRetry(indexEntry, maxAttempts, baseDelayMs) {
+  var attempts = Math.max(1, Number(maxAttempts) || 3);
+  var baseDelay = Math.max(50, Number(baseDelayMs) || 250);
+  var lastError = null;
+  for (var attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      var submissionId = await resolveSubmissionId(indexEntry);
+      return await fetchSubmissionDetails(submissionId);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await sleep(baseDelay * attempt);
+      }
+    }
+  }
+
+  throw new Error(
+    'Failed to fetch submission details after retries: ' +
+      (lastError && lastError.message ? lastError.message : 'Unknown error')
+  );
+}
+
+function buildProblemPayloadFromAccepted(indexEntry, details) {
+  var question = details && details.question ? details.question : {};
+  var rawStatement = question.content || '';
+  var languageNode = details && details.lang ? details.lang : {};
+  var language =
+    languageNode.verboseName ||
+    languageNode.name ||
+    indexEntry.language ||
+    findLanguage() ||
+    'Unknown';
+
+  return {
+    title: normalizeText(
+      question.title || indexEntry.title || indexEntry.slug || 'unknown-problem'
+    ),
+    slug: question.titleSlug || indexEntry.slug,
+    url: 'https://leetcode.com/problems/' + (question.titleSlug || indexEntry.slug) + '/',
+    difficulty: question.difficulty || 'Unknown',
+    statement: htmlToText(rawStatement) || 'Statement was not detected on the current page.',
+    language: language,
+    code: String(details.code || ''),
+    submissionTimestamp: Number(details.timestamp || indexEntry.timestamp || 0),
+    savedAt: new Date().toISOString(),
+    autoTriggered: true,
+    submissionAccepted: true,
+  };
+}
+
+async function syncAcceptedProfileSubmissions(maxToScan, startCursor, batchSize) {
+  if (!/leetcode\.com$/.test(window.location.hostname)) {
+    throw new Error('Open leetcode.com before running profile sync.');
+  }
+
+  var accepted = await fetchAcceptedSubmissionIndex(maxToScan);
+  var cursor = Math.max(0, Number(startCursor) || 0);
+  var safeBatchSize = Math.max(1, Number(batchSize) || 100);
+  var batchAccepted = accepted.slice(cursor, cursor + safeBatchSize);
+  var batchEnd = cursor + batchAccepted.length;
+  var hasMore = batchEnd < accepted.length;
+  var nextCursor = hasMore ? batchEnd : 0;
+
+  var result = {
+    ok: true,
+    totalAccepted: accepted.length,
+    batchStart: cursor,
+    batchEnd: batchEnd,
+    batchSize: safeBatchSize,
+    hasMore: hasMore,
+    nextCursor: nextCursor,
+    attempted: 0,
+    prepared: 0,
+    saved: 0,
+    skipped: 0,
+    failed: 0,
+    failures: [],
+  };
+  var preparedProblems = [];
+
+  debugAutoSave('bulk-sync-start', {
+    totalAccepted: accepted.length,
+    batchStart: cursor,
+    batchEnd: batchEnd,
+    batchSize: safeBatchSize,
+  });
+
+  var workerCursor = 0;
+  var processed = 0;
+  var workers = [];
+  var failedCandidates = [];
+  var workerCount = Math.min(
+    4,
+    Math.max(2, Math.floor((window.navigator.hardwareConcurrency || 6) / 3))
+  );
+
+  function runDetailsWorker() {
+    return new Promise(function (resolve) {
+      (async function next() {
+        if (workerCursor >= batchAccepted.length) {
+          resolve();
+          return;
+        }
+
+        var index = workerCursor;
+        workerCursor += 1;
+        var entry = batchAccepted[index];
+        result.attempted += 1;
+
+        try {
+          var details = await fetchSubmissionDetailsWithRetry(entry, 3, 250);
+          var payload = buildProblemPayloadFromAccepted(entry, details);
+
+          if (!payload.code || !payload.code.trim()) {
+            throw new Error('Empty code for accepted submission.');
+          }
+
+          preparedProblems.push(payload);
+          result.prepared += 1;
+        } catch (itemError) {
+          failedCandidates.push({
+            slug: entry.slug,
+            entry: entry,
+            error: itemError && itemError.message ? itemError.message : String(itemError),
+          });
+        }
+
+        processed += 1;
+        if (processed % 20 === 0 || processed === batchAccepted.length) {
+          debugAutoSave('bulk-sync-progress', {
+            processed: processed,
+            total: batchAccepted.length,
+            prepared: result.prepared,
+            skipped: result.skipped,
+            failed: result.failed,
+          });
+        }
+
+        next();
+      })();
+    });
+  }
+
+  for (var w = 0; w < workerCount; w += 1) {
+    workers.push(runDetailsWorker());
+  }
+  await Promise.all(workers);
+
+  if (failedCandidates.length) {
+    debugAutoSave('bulk-sync-recovery-start', {
+      failedCandidates: failedCandidates.length,
+    });
+
+    // Recovery pass is sequential to reduce throttling/rate-limit failures.
+    for (var ri = 0; ri < failedCandidates.length; ri += 1) {
+      var failedItem = failedCandidates[ri] || {};
+      var failedEntry = failedItem.entry || null;
+      if (!failedEntry) {
+        result.failed += 1;
+        result.failures.push({
+          slug: failedItem.slug || 'unknown-problem',
+          error: failedItem.error || 'Unknown sync failure.',
+        });
+        continue;
+      }
+
+      try {
+        var recoveryDetails = await fetchSubmissionDetailsWithRetry(failedEntry, 5, 500);
+        var recoveryPayload = buildProblemPayloadFromAccepted(failedEntry, recoveryDetails);
+
+        if (!recoveryPayload.code || !recoveryPayload.code.trim()) {
+          throw new Error('Empty code for accepted submission after recovery.');
+        }
+
+        preparedProblems.push(recoveryPayload);
+        result.prepared += 1;
+      } catch (recoveryError) {
+        result.failed += 1;
+        result.failures.push({
+          slug: failedItem.slug || failedEntry.slug || 'unknown-problem',
+          error:
+            recoveryError && recoveryError.message
+              ? recoveryError.message
+              : failedItem.error || 'Unknown sync failure.',
+        });
+      }
+
+      // Small delay avoids burst failures against submission details endpoint.
+      await sleep(180);
+    }
+  }
+
+  if (preparedProblems.length) {
+    debugAutoSave('bulk-sync-commit-start', {
+      prepared: preparedProblems.length,
+    });
+
+    // Avoid oversized runtime payloads for very large profiles.
+    var chunkSize = 200;
+    for (var start = 0; start < preparedProblems.length; start += chunkSize) {
+      var chunk = preparedProblems.slice(start, start + chunkSize);
+      var bulkResponse = await runtimeSend({
+        type: 'bulkSaveProblemsToGithub',
+        payload: {
+          problems: chunk,
+        },
+      });
+
+      if (!bulkResponse || !bulkResponse.ok) {
+        throw new Error(
+          (bulkResponse && bulkResponse.error) || 'Bulk commit failed for accepted submissions.'
+        );
+      }
+
+      var bulkResult = bulkResponse.result || {};
+      result.saved += Number(bulkResult.saved) || 0;
+      result.skipped += Number(bulkResult.skipped) || 0;
+      result.failed += Number(bulkResult.failed) || 0;
+      if (Array.isArray(bulkResult.failures) && bulkResult.failures.length) {
+        result.failures = result.failures.concat(bulkResult.failures);
+      }
+    }
+  }
+
+  debugAutoSave('bulk-sync-complete', {
+    totalAccepted: result.totalAccepted,
+    batchStart: result.batchStart,
+    batchEnd: result.batchEnd,
+    hasMore: result.hasMore,
+    nextCursor: result.nextCursor,
+    prepared: result.prepared,
+    saved: result.saved,
+    skipped: result.skipped,
+    failed: result.failed,
+  });
+
+  return result;
+}
+
 var _leetQuestionsRoot = typeof globalThis !== 'undefined' ? globalThis : window;
 
 if (!_leetQuestionsRoot.__leetQuestionsAutoSaveState) {
@@ -514,9 +1111,14 @@ function runtimeSend(message) {
       }
 
       // Prevent hanging forever if callback is never delivered.
+      var timeoutMs = 4000;
+      if (message && message.type === 'bulkSaveProblemsToGithub') {
+        timeoutMs = 20 * 60 * 1000;
+      }
+
       var timeoutId = setTimeout(function () {
         finish({ ok: false, error: 'Runtime message timeout.' });
-      }, 4000);
+      }, timeoutMs);
 
       function onRuntimeResponse(response) {
         try {
@@ -849,7 +1451,29 @@ function setupMessageListener() {
 
     runtime.onMessage.addListener(function (request, sender, sendResponse) {
       try {
-        if (!request || request.type !== 'collectProblemData') {
+        if (!request || !request.type) {
+          return;
+        }
+
+        if (request.type === 'bulkSyncAcceptedProfile') {
+          var payload = request.payload || {};
+          syncAcceptedProfileSubmissions(payload.maxToScan, payload.startCursor, payload.batchSize)
+            .then(function (result) {
+              sendResponse({ ok: true, result: result });
+            })
+            .catch(function (error) {
+              sendResponse({
+                ok: false,
+                error:
+                  error && error.message
+                    ? error.message
+                    : 'Failed to sync accepted profile submissions.',
+              });
+            });
+          return true;
+        }
+
+        if (request.type !== 'collectProblemData') {
           return;
         }
 
@@ -886,9 +1510,7 @@ function setupMessageListener() {
   }
 }
 
-if (isLikelyProblemPage()) {
-  setupMessageListener();
-}
+setupMessageListener();
 
 if (isLikelyProblemPage()) {
   startAcceptedWatcher();
