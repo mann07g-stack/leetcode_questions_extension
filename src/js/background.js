@@ -261,6 +261,52 @@ function normalizeLanguage(input) {
     .toLowerCase();
 }
 
+function titleCaseWords(input) {
+  var text = String(input || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) {
+    return '';
+  }
+  return text
+    .split(' ')
+    .map(function (part) {
+      return part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : '';
+    })
+    .join(' ');
+}
+
+function getTodaysDate() {
+  var now = new Date();
+  var mm = String(now.getMonth() + 1).padStart(2, '0');
+  var dd = String(now.getDate()).padStart(2, '0');
+  var yyyy = String(now.getFullYear());
+  return mm + '-' + dd + '-' + yyyy;
+}
+
+function getCurrentTime() {
+  var now = new Date();
+  var hh = String(now.getHours()).padStart(2, '0');
+  var mm = String(now.getMinutes()).padStart(2, '0');
+  var ss = String(now.getSeconds()).padStart(2, '0');
+  return hh + '-' + mm + '-' + ss;
+}
+
+function applyCommitTemplate(template, context, fallback) {
+  var base = String(template || '').trim();
+  if (!base) {
+    return fallback;
+  }
+  return base.replace(/\{(\w+)\}/g, function (match, key) {
+    if (Object.prototype.hasOwnProperty.call(context, key)) {
+      var value = context[key];
+      return value === undefined || value === null ? '' : String(value);
+    }
+    return match;
+  });
+}
+
 function languageToExtension(language) {
   var map = {
     c: '.c',
@@ -573,11 +619,24 @@ async function upsertGithubFile(params) {
 }
 
 async function saveProblemToGithub(problem, tabId) {
-  var config = await getStorage(['githubToken', 'githubRepo', 'githubBranch', 'githubFolder']);
+  var config = await getStorage([
+    'githubToken',
+    'githubRepo',
+    'githubBranch',
+    'githubFolder',
+    'useDifficultyFolder',
+    'useLanguageFolder',
+    'useTimestampFilename',
+    'custom_commit_message',
+  ]);
   var token = config.githubToken;
   var repo = config.githubRepo;
   var branch = config.githubBranch || 'main';
   var folder = config.githubFolder || 'problems';
+  var useDifficultyFolder = Boolean(config.useDifficultyFolder);
+  var useLanguageFolder = Boolean(config.useLanguageFolder);
+  var useTimestampFilename = Boolean(config.useTimestampFilename);
+  var customCommitTemplate = config.custom_commit_message || '';
 
   if (!token || !repo) {
     throw new Error('Missing GitHub token or repository. Save settings in popup.');
@@ -629,7 +688,36 @@ async function saveProblemToGithub(problem, tabId) {
   }
 
   var slug = normalizePathSegment(finalProblem.slug || finalProblem.title || 'problem');
-  var base = folder.replace(/^\/+|\/+$/g, '') + '/' + slug;
+  var baseParts = [];
+  var folderRoot = folder.replace(/^\/+|\/+$/g, '');
+  if (folderRoot) {
+    baseParts.push(folderRoot);
+  }
+  if (useLanguageFolder) {
+    baseParts.push(normalizePathSegment(titleCaseWords(finalProblem.language || 'unknown')));
+  }
+  if (useDifficultyFolder) {
+    baseParts.push(normalizePathSegment(titleCaseWords(finalProblem.difficulty || 'unknown')));
+  }
+  baseParts.push(slug);
+  var base = baseParts.join('/');
+
+  var commitContext = {
+    problemName: slug,
+    difficulty: finalProblem.difficulty || 'Unknown',
+    language: finalProblem.language || 'Unknown',
+    date: getTodaysDate(),
+    time: getCurrentTime(),
+    url: finalProblem.url || '',
+  };
+
+  var readmeCommitMessage = 'docs: save ' + finalProblem.title;
+  var codeCommitMessage = applyCommitTemplate(
+    customCommitTemplate,
+    commitContext,
+    'code: save ' + finalProblem.title + ' solution'
+  );
+
   var readmePath = base + '/README.md';
   var markdownContent = buildMarkdown(finalProblem);
 
@@ -639,10 +727,14 @@ async function saveProblemToGithub(problem, tabId) {
     branch: branch,
     path: readmePath,
     content: markdownContent,
-    message: 'docs: save ' + finalProblem.title,
+    message: readmeCommitMessage,
   });
 
-  var codePath = base + '/solution' + fileExtension;
+  var codeFileName = 'solution';
+  if (useTimestampFilename) {
+    codeFileName = 'solution-' + getTodaysDate() + '-' + getCurrentTime();
+  }
+  var codePath = base + '/' + codeFileName + fileExtension;
 
   await upsertGithubFile({
     token: token,
@@ -650,7 +742,7 @@ async function saveProblemToGithub(problem, tabId) {
     branch: branch,
     path: codePath,
     content: finalProblem.code,
-    message: 'code: save ' + finalProblem.title + ' solution',
+    message: codeCommitMessage,
   });
 
   var stats = await getStats();

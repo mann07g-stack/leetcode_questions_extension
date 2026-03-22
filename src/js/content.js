@@ -38,6 +38,170 @@ function isLikelyProblemPage() {
   return /leetcode\.com\/problems\//.test(window.location.href);
 }
 
+function getPushIconSvgMarkup() {
+  return (
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
+    '<path fill="currentColor" d="M12 2l4 4h-3v7h-2V6H8l4-4zm-7 13h2v5h10v-5h2v7H5v-7z"></path>' +
+    '</svg>'
+  );
+}
+
+function findManualPushAnchor() {
+  var selectors = [
+    '[data-e2e-locator="console-submit-button"]',
+    '[data-cy="submit-code-btn"]',
+    'button[data-e2e-locator*="submit"]',
+    'button:has(svg)',
+  ];
+
+  for (var i = 0; i < selectors.length; i += 1) {
+    try {
+      var node = document.querySelector(selectors[i]);
+      if (node && node.parentElement) {
+        return node.parentElement;
+      }
+    } catch {
+      // Ignore invalid selector support issues in some pages.
+    }
+  }
+
+  return null;
+}
+
+function setManualPushButtonState(state, message) {
+  var btn = document.getElementById('leethubManualPushBtn');
+  if (!btn) {
+    return;
+  }
+
+  if (state === 'working') {
+    btn.disabled = true;
+    btn.style.opacity = '0.8';
+    btn.style.borderColor = '#6ca7ff';
+    btn.title = message || 'Pushing to GitHub...';
+    return;
+  }
+
+  if (state === 'success') {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.borderColor = '#40b36b';
+    btn.title = message || 'Push successful';
+    return;
+  }
+
+  if (state === 'error') {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.borderColor = '#d9534f';
+    btn.title = message || 'Push failed';
+    return;
+  }
+
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.style.borderColor = 'rgba(130, 149, 197, 0.35)';
+  btn.title = message || 'Push accepted solution to GitHub';
+}
+
+async function runManualPush() {
+  setManualPushButtonState('working');
+
+  try {
+    var status = getSubmissionStatusFromPage();
+    if (status !== 'accepted') {
+      setManualPushButtonState('error', 'Latest result is not Accepted');
+      debugAutoSave('manual-push-blocked', { status: status });
+      return;
+    }
+
+    var payload = await getProblemData();
+    if (!payload || !payload.ok || !payload.data) {
+      setManualPushButtonState('error', 'Could not collect problem data');
+      debugAutoSave('manual-push-collect-failed', {
+        payloadOk: Boolean(payload && payload.ok),
+      });
+      return;
+    }
+
+    payload.data.autoTriggered = true;
+    payload.data.submissionAccepted = true;
+
+    var response = await runtimeSend({
+      type: 'saveProblemToGithub',
+      payload: payload.data,
+    });
+
+    if (!response || !response.ok) {
+      setManualPushButtonState(
+        'error',
+        response && response.error ? response.error : 'Push failed'
+      );
+      debugAutoSave('manual-push-failed', {
+        error: response && response.error ? response.error : 'Unknown push error',
+      });
+      return;
+    }
+
+    setManualPushButtonState('success', 'Accepted solution pushed');
+    debugAutoSave('manual-push-success', {
+      codePath: response.result ? response.result.codePath : null,
+    });
+  } catch (error) {
+    setManualPushButtonState('error', error && error.message ? error.message : 'Push failed');
+    debugAutoSave('manual-push-exception', {
+      error: error && error.message ? error.message : String(error),
+    });
+  } finally {
+    setTimeout(function () {
+      setManualPushButtonState('idle');
+    }, 2200);
+  }
+}
+
+function ensureManualPushButton() {
+  if (!isLikelyProblemPage()) {
+    return;
+  }
+
+  var existing = document.getElementById('leethubManualPushBtn');
+  if (existing) {
+    return;
+  }
+
+  var anchor = findManualPushAnchor();
+  if (!anchor) {
+    return;
+  }
+
+  var btn = document.createElement('button');
+  btn.id = 'leethubManualPushBtn';
+  btn.type = 'button';
+  btn.innerHTML = 'Push ' + getPushIconSvgMarkup();
+  btn.style.display = 'inline-flex';
+  btn.style.alignItems = 'center';
+  btn.style.gap = '6px';
+  btn.style.marginRight = '8px';
+  btn.style.padding = '6px 10px';
+  btn.style.borderRadius = '8px';
+  btn.style.border = '1px solid rgba(130, 149, 197, 0.35)';
+  btn.style.background = 'rgba(20, 35, 68, 0.92)';
+  btn.style.color = '#e7efff';
+  btn.style.fontSize = '12px';
+  btn.style.cursor = 'pointer';
+  btn.style.zIndex = '10';
+  btn.title = 'Push accepted solution to GitHub';
+  btn.addEventListener('click', function () {
+    runManualPush().catch(function (error) {
+      debugAutoSave('manual-push-handler-error', {
+        error: error && error.message ? error.message : String(error),
+      });
+    });
+  });
+
+  anchor.insertBefore(btn, anchor.firstChild);
+}
+
 function sanitizeLanguageCandidate(text) {
   var candidate = String(text || '')
     .replace(/[\u25be\u25bc\u2304]+/g, ' ')
@@ -591,6 +755,8 @@ function startAcceptedWatcher() {
   }
   _leetQuestionsRoot.__leetQuestionsWatcherStarted = true;
 
+  ensureManualPushButton();
+
   document.addEventListener(
     'click',
     function (event) {
@@ -649,6 +815,7 @@ function startAcceptedWatcher() {
   );
 
   var observer = new MutationObserver(function () {
+    ensureManualPushButton();
     tryAutoSave().catch(function (error) {
       debugAutoSave('observer-tryAutoSave-error', {
         error: error && error.message ? error.message : String(error),

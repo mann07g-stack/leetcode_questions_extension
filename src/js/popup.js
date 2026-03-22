@@ -224,6 +224,35 @@ function readSettingsFromUI() {
   };
 }
 
+function readCommitOptionsFromUI() {
+  return {
+    custom_commit_message: byId('customCommitMessage').value.trim(),
+    useDifficultyFolder: Boolean(byId('useDifficultyFolder').checked),
+    useLanguageFolder: Boolean(byId('useLanguageFolder').checked),
+    useTimestampFilename: Boolean(byId('useTimestampFilename').checked),
+  };
+}
+
+async function loadCommitOptions() {
+  var state = await getStorage([
+    'custom_commit_message',
+    'useDifficultyFolder',
+    'useLanguageFolder',
+    'useTimestampFilename',
+  ]);
+
+  byId('customCommitMessage').value = state.custom_commit_message || '';
+  byId('useDifficultyFolder').checked = Boolean(state.useDifficultyFolder);
+  byId('useLanguageFolder').checked = Boolean(state.useLanguageFolder);
+  byId('useTimestampFilename').checked = Boolean(state.useTimestampFilename);
+}
+
+async function handleSaveCommitOptions() {
+  var options = readCommitOptionsFromUI();
+  await setStorage(options);
+  setStatus('Commit and folder options saved.', false);
+}
+
 async function loadOAuthSetup() {
   byId('oauthRedirectUrl').value = 'https://github.com/';
 
@@ -401,10 +430,12 @@ async function init() {
   byId('saveOAuthConfig').addEventListener('click', handleSaveOAuthConfig);
   byId('refreshDebug').addEventListener('click', refreshAutoSaveDebug);
   byId('clearDebug').addEventListener('click', clearAutoSaveDebug);
+  byId('saveCommitOptions').addEventListener('click', handleSaveCommitOptions);
 
   byId('saveProblem').textContent = 'Auto-save Only';
 
   await loadOAuthSetup();
+  await loadCommitOptions();
   await refreshStats();
   await refreshAuthAndRepos();
   await refreshAutoSaveDebug();

@@ -95,6 +95,34 @@
         </div>
       </section>
 
+      <section class="panel">
+        <h2>Commit & Folder Options</h2>
+
+        <label for="customCommitMessage">Custom Commit Message</label>
+        <textarea
+          id="customCommitMessage"
+          rows="3"
+          placeholder="Time: {time}, Date: {date}, {problemName} ({difficulty}) - {language}"
+        ></textarea>
+        <p class="muted">
+          Variables: {problemName}, {difficulty}, {language}, {date}, {time}, {url}
+        </p>
+
+        <div class="toggle-list">
+          <label class="check-row"
+            ><input id="useDifficultyFolder" type="checkbox" /> Use Difficulty Subfolder</label
+          >
+          <label class="check-row"
+            ><input id="useLanguageFolder" type="checkbox" /> Use Language Subfolder</label
+          >
+          <label class="check-row"
+            ><input id="useTimestampFilename" type="checkbox" /> Timestamp Code Filename</label
+          >
+        </div>
+
+        <button id="saveCommitOptions" class="secondary full">Save Commit & Folder Options</button>
+      </section>
+
       <section class="panel stats">
         <h2>Saved Problems</h2>
         <div class="stats-grid">
