@@ -52,9 +52,5 @@ This scope is necessary to provide full functionality including private repo acc
 ## What Gets Saved
 
 - Problem metadata and statement to `<folder>/<problem-slug>/README.md`
-- Solution code to `<folder>/<problem-slug>/solution.<ext>`
+- Solution code to `<folder>/<problem-slug>/solution.<file format>`
 
-## Temporary Logo
-
-Current icon file is `assets/image.jpg` as a temporary placeholder.
-Replace this file with your final logo image when ready.
