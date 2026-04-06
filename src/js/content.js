@@ -1112,43 +1112,55 @@ function runtimeSend(message) {
 
       // Prevent hanging forever if callback is never delivered.
       var timeoutMs = 4000;
+      if (message && message.type === 'saveProblemToGithub') {
+        timeoutMs = 2 * 60 * 1000;
+      }
       if (message && message.type === 'bulkSaveProblemsToGithub') {
         timeoutMs = 20 * 60 * 1000;
       }
 
-      var timeoutId = setTimeout(function () {
-        finish({ ok: false, error: 'Runtime message timeout.' });
-      }, timeoutMs);
+      function sendAttempt(allowRetry) {
+        var timeoutId = setTimeout(function () {
+          finish({ ok: false, error: 'Runtime message timeout.' });
+        }, timeoutMs);
 
-      function onRuntimeResponse(response) {
-        try {
-          clearTimeout(timeoutId);
-          // Extension context may be torn down between send and callback.
-          var callbackRuntime = getSafeRuntime();
-          if (!callbackRuntime) {
-            finish({ ok: false, error: 'Extension runtime unavailable during callback.' });
-            return;
+        function onRuntimeResponse(response) {
+          try {
+            clearTimeout(timeoutId);
+
+            var lastError = chrome && chrome.runtime ? chrome.runtime.lastError : null;
+            if (lastError) {
+              var errorMessage = lastError.message || 'Extension runtime error.';
+              var isTransient =
+                /receiving end does not exist|extension context invalidated|could not establish connection/i.test(
+                  String(errorMessage)
+                );
+              if (allowRetry && isTransient) {
+                setTimeout(function () {
+                  sendAttempt(false);
+                }, 150);
+                return;
+              }
+              finish({ ok: false, error: errorMessage });
+              return;
+            }
+
+            finish(response || {});
+          } catch (callbackError) {
+            finish({
+              ok: false,
+              error:
+                callbackError && callbackError.message
+                  ? callbackError.message
+                  : 'Failed to process runtime callback.',
+            });
           }
-
-          var lastError = callbackRuntime.lastError;
-          if (lastError) {
-            finish({ ok: false, error: lastError.message });
-            return;
-          }
-
-          finish(response || {});
-        } catch (callbackError) {
-          finish({
-            ok: false,
-            error:
-              callbackError && callbackError.message
-                ? callbackError.message
-                : 'Failed to process runtime callback.',
-          });
         }
+
+        runtime.sendMessage(message, onRuntimeResponse);
       }
 
-      runtime.sendMessage(message, onRuntimeResponse);
+      sendAttempt(true);
     } catch (error) {
       resolve({
         ok: false,
@@ -1179,6 +1191,28 @@ function debugAutoSave(stage, data) {
   }
 
   runtimeSend({ type: 'autosaveDebug', payload: payload });
+}
+
+function isNonRetriableAutoSaveError(errorMessage) {
+  var message = String(errorMessage || '').toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return /manual save is disabled|not accepted|no solution code detected|unsupported language|missing github token or repository|save settings in popup|connect github first|bad credentials|requires authentication|permission denied|resource not accessible/.test(
+    message
+  );
+}
+
+function isTransientRuntimeAutoSaveError(errorMessage) {
+  var message = String(errorMessage || '').toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return /runtime message timeout|extension runtime unavailable|receiving end does not exist|extension context invalidated|could not establish connection/.test(
+    message
+  );
 }
 
 async function tryAutoSave() {
@@ -1286,21 +1320,23 @@ async function tryAutoSave() {
         // Keep retries possible when save fails due to transient/runtime issues.
         autoSaveState.lastKey = '';
       }
+      var saveErrorMessage = response && response.error ? response.error : 'Unknown save error';
+      var shouldDisarm = isNonRetriableAutoSaveError(saveErrorMessage);
+      var isTransientRuntimeError = isTransientRuntimeAutoSaveError(saveErrorMessage);
       debugAutoSave('save-failed', {
-        error: response && response.error ? response.error : 'Unknown save error',
+        error: saveErrorMessage,
+        nonRetriable: shouldDisarm,
+        transientRuntime: isTransientRuntimeError,
       });
-      console.warn(
-        'Auto-save failed:',
-        response && response.error ? response.error : 'Unknown save error'
-      );
+      if (shouldDisarm) {
+        console.info('Auto-save skipped:', saveErrorMessage);
+      } else if (isTransientRuntimeError) {
+        console.info('Auto-save retry pending:', saveErrorMessage);
+      } else {
+        console.warn('Auto-save failed:', saveErrorMessage);
+      }
 
-      if (
-        response &&
-        response.error &&
-        /manual save is disabled|not accepted|no solution code detected|unsupported language/i.test(
-          response.error
-        )
-      ) {
+      if (shouldDisarm) {
         autoSaveState.armed = false;
       }
       return;

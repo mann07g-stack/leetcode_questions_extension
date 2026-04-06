@@ -205,6 +205,81 @@ async function extractCodeFromTab(tabId) {
   }
 }
 
+async function extractLanguageFromTab(tabId) {
+  if (!tabId) {
+    return '';
+  }
+
+  try {
+    var language = await executeScriptInMainWorld(tabId, function () {
+      try {
+        if (
+          window.monaco &&
+          window.monaco.editor &&
+          typeof window.monaco.editor.getModels === 'function'
+        ) {
+          var models = window.monaco.editor.getModels();
+          if (
+            models &&
+            models.length &&
+            models[0] &&
+            typeof models[0].getLanguageId === 'function'
+          ) {
+            var monacoLanguage = String(models[0].getLanguageId() || '').trim();
+            if (monacoLanguage) {
+              return monacoLanguage;
+            }
+          }
+        }
+
+        var selectors = [
+          'button[data-cy="lang-select"]',
+          'div[data-cy="lang-select"]',
+          '[id*="headlessui-listbox-button"]',
+          '[class*="language-select"] button',
+          '[class*="lang-select"] button',
+          '.select-language',
+          '[role="button"][data-testid="lang"]',
+        ];
+
+        for (var i = 0; i < selectors.length; i += 1) {
+          var node = null;
+          try {
+            node = document.querySelector(selectors[i]);
+          } catch {
+            node = null;
+          }
+          var text =
+            node && (node.innerText || node.textContent)
+              ? String(node.innerText || node.textContent).trim()
+              : '';
+          if (text) {
+            return text;
+          }
+        }
+
+        return '';
+      } catch {
+        return '';
+      }
+    });
+
+    return String(language || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+async function resolveBestLanguage(existingLanguage, tabId) {
+  var current = String(existingLanguage || '').trim();
+  var liveLanguage = await extractLanguageFromTab(tabId);
+  if (liveLanguage && liveLanguage.toLowerCase() !== 'unknown') {
+    return liveLanguage;
+  }
+
+  return current || 'Unknown';
+}
+
 async function resolveBestCode(existingCode, tabId) {
   var current = String(existingCode || '');
 
@@ -313,7 +388,7 @@ function planProblemFiles(problem, options) {
   var useLanguageFolder = Boolean(options.useLanguageFolder);
   var useTimestampFilename = Boolean(options.useTimestampFilename);
   var customCommitTemplate = String(options.customCommitTemplate || '');
-  var fileExtension = String(options.fileExtension || '');
+  var fileExtensions = Array.isArray(options.fileExtensions) ? options.fileExtensions : [];
 
   var slug = normalizePathSegment(problem.slug || problem.title || 'problem');
   var baseParts = [];
@@ -351,12 +426,38 @@ function planProblemFiles(problem, options) {
   if (useTimestampFilename) {
     codeFileName = 'solution-' + getTodaysDate() + '-' + getCurrentTime();
   }
-  var codePath = base + '/' + codeFileName + fileExtension;
+  var normalizedExtensions = [];
+  for (var i = 0; i < fileExtensions.length; i += 1) {
+    var candidate = String(fileExtensions[i] || '').trim();
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.charAt(0) !== '.') {
+      candidate = '.' + candidate;
+    }
+    if (normalizedExtensions.indexOf(candidate) === -1) {
+      normalizedExtensions.push(candidate);
+    }
+  }
+
+  if (!normalizedExtensions.length) {
+    normalizedExtensions.push('.txt');
+  }
+
+  var codeEntries = [];
+  for (var j = 0; j < normalizedExtensions.length; j += 1) {
+    codeEntries.push({
+      extension: normalizedExtensions[j],
+      path: base + '/' + codeFileName + normalizedExtensions[j],
+      content: problem.code,
+    });
+  }
 
   return {
     slug: slug,
     readmePath: readmePath,
-    codePath: codePath,
+    codePath: codeEntries[0].path,
+    codePaths: codeEntries,
     readmeContent: buildMarkdown(problem),
     codeContent: problem.code,
     readmeCommitMessage: readmeCommitMessage,
@@ -432,6 +533,35 @@ function languageToExtension(language) {
   return map[normalized] || null;
 }
 
+function resolveFileExtensions(language, code) {
+  var rawLanguage = String(language || '')
+    .toLowerCase()
+    .trim();
+
+  var extension = languageToExtension(rawLanguage);
+  if (!extension) {
+    var simplified = rawLanguage
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/[^a-z0-9+#]+/g, ' ')
+      .trim();
+    if (simplified) {
+      var parts = simplified.split(/\s+/);
+      for (var i = 0; i < parts.length; i += 1) {
+        extension = languageToExtension(parts[i]);
+        if (extension) {
+          break;
+        }
+      }
+    }
+  }
+
+  if (!extension) {
+    extension = inferExtensionFromCode(code) || '.code';
+  }
+
+  return [extension];
+}
+
 function inferExtensionFromCode(code) {
   var text = String(code || '').trim();
   if (!text) {
@@ -465,6 +595,7 @@ function buildMarkdown(problem) {
   lines.push('# ' + problem.title);
   lines.push('');
   lines.push('- Difficulty: ' + problem.difficulty);
+  lines.push('- Language: ' + (problem.language || 'Unknown'));
   lines.push('- URL: ' + problem.url);
   lines.push('- Saved At: ' + problem.savedAt);
   lines.push('');
@@ -710,18 +841,13 @@ async function saveProblemToGithub(problem, tabId) {
   }
 
   finalProblem.code = await resolveBestCode(finalProblem.code, tabId);
+  finalProblem.language = await resolveBestLanguage(finalProblem.language, tabId);
 
   if (!finalProblem.code || !finalProblem.code.trim()) {
     throw new Error('No solution code detected. Submission was not saved.');
   }
 
-  var fileExtension = languageToExtension(finalProblem.language);
-  if (!fileExtension) {
-    fileExtension = inferExtensionFromCode(finalProblem.code);
-  }
-  if (!fileExtension) {
-    throw new Error('Unsupported language for auto-save: ' + String(finalProblem.language || ''));
-  }
+  var fileExtensions = resolveFileExtensions(finalProblem.language, finalProblem.code);
 
   if (finalProblem && finalProblem.autoTriggered) {
     var autoState = await getStorage(['lastAutoSaveKey']);
@@ -750,7 +876,7 @@ async function saveProblemToGithub(problem, tabId) {
     useLanguageFolder: useLanguageFolder,
     useTimestampFilename: useTimestampFilename,
     customCommitTemplate: customCommitTemplate,
-    fileExtension: fileExtension,
+    fileExtensions: fileExtensions,
   });
 
   var readmeWrite = await upsertGithubFile({
@@ -762,14 +888,17 @@ async function saveProblemToGithub(problem, tabId) {
     message: filePlan.readmeCommitMessage,
   });
 
-  await upsertGithubFile({
-    token: token,
-    repo: repo,
-    branch: branch,
-    path: filePlan.codePath,
-    content: finalProblem.code,
-    message: filePlan.codeCommitMessage,
-  });
+  for (var codeIndex = 0; codeIndex < filePlan.codePaths.length; codeIndex += 1) {
+    var codeEntry = filePlan.codePaths[codeIndex];
+    await upsertGithubFile({
+      token: token,
+      repo: repo,
+      branch: branch,
+      path: codeEntry.path,
+      content: codeEntry.content,
+      message: filePlan.codeCommitMessage,
+    });
+  }
 
   var stats = await getStats();
   if (readmeWrite && readmeWrite.created) {
@@ -779,6 +908,9 @@ async function saveProblemToGithub(problem, tabId) {
   return {
     readmePath: filePlan.readmePath,
     codePath: filePlan.codePath,
+    codePaths: filePlan.codePaths.map(function (entry) {
+      return entry.path;
+    }),
     stats: stats,
   };
 }
@@ -925,6 +1057,7 @@ async function bulkSaveProblemsToGithub(problems) {
   var seenProblemKeys = {};
   var plannedByPath = {};
   var newReadmeDifficulties = [];
+  var plannedProblemCount = 0;
   var failures = [];
   var skipped = 0;
   var failed = 0;
@@ -956,14 +1089,7 @@ async function bulkSaveProblemsToGithub(problems) {
       }
       seenProblemKeys[key] = true;
 
-      var fileExtension = languageToExtension(problem.language);
-      if (!fileExtension) {
-        fileExtension = inferExtensionFromCode(problem.code);
-      }
-      if (!fileExtension) {
-        skipped += 1;
-        continue;
-      }
+      var fileExtensions = resolveFileExtensions(problem.language, problem.code);
 
       var plan = planProblemFiles(problem, {
         folder: folder,
@@ -971,17 +1097,21 @@ async function bulkSaveProblemsToGithub(problems) {
         useLanguageFolder: useLanguageFolder,
         useTimestampFilename: useTimestampFilename,
         customCommitTemplate: customCommitTemplate,
-        fileExtension: fileExtension,
+        fileExtensions: fileExtensions,
       });
 
       plannedByPath[plan.readmePath] = {
         path: plan.readmePath,
         content: plan.readmeContent,
       };
-      plannedByPath[plan.codePath] = {
-        path: plan.codePath,
-        content: plan.codeContent,
-      };
+      for (var cp = 0; cp < plan.codePaths.length; cp += 1) {
+        var codeEntry = plan.codePaths[cp];
+        plannedByPath[codeEntry.path] = {
+          path: codeEntry.path,
+          content: codeEntry.content,
+        };
+      }
+      plannedProblemCount += 1;
 
       if (!existingPaths[plan.readmePath]) {
         newReadmeDifficulties.push(String(problem.difficulty || 'Unknown').toLowerCase());
@@ -1056,8 +1186,7 @@ async function bulkSaveProblemsToGithub(problems) {
     }
   );
 
-  var commitMessage =
-    'bulk: sync ' + String(Math.floor(tree.length / 2)) + ' accepted LeetCode solutions';
+  var commitMessage = 'bulk: sync ' + String(plannedProblemCount) + ' accepted LeetCode solutions';
   var newCommit = await githubApiWithToken(
     token,
     'https://api.github.com/repos/' + repo + '/git/commits',
@@ -1107,7 +1236,7 @@ async function bulkSaveProblemsToGithub(problems) {
     committed: true,
     commitSha: newCommit.sha,
     total: problems.length,
-    saved: Math.floor(tree.length / 2),
+    saved: plannedProblemCount,
     skipped: skipped,
     failed: failed,
     failures: failures,
